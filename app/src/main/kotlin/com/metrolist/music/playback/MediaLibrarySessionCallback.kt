@@ -63,7 +63,9 @@ import javax.inject.Inject
 import com.metrolist.music.constants.AndroidAutoSectionsOrderKey
 import com.metrolist.music.constants.AndroidAutoYouTubePlaylistsKey
 import com.metrolist.music.db.entities.LyricsEntity
+import com.metrolist.music.extensions.metadata
 import com.metrolist.music.lyrics.LyricsEntry
+import com.metrolist.music.lyrics.LyricsHelper
 import com.metrolist.music.lyrics.LyricsUtils
 import com.metrolist.music.ui.screens.settings.AndroidAutoSection
 import com.metrolist.music.ui.screens.settings.deserializeSections
@@ -79,6 +81,7 @@ constructor(
     @ApplicationContext val context: Context,
     val database: MusicDatabase,
     val downloadUtil: DownloadUtil,
+    val lyricsHelper: LyricsHelper
 ) : MediaLibrarySession.Callback {
     private val scope = CoroutineScope(Dispatchers.Main) + Job()
     lateinit var service: MusicService
@@ -389,7 +392,33 @@ constructor(
                         }
 
                         val lyricsEntity = database.lyrics(currentMediaId).firstOrNull()
-                        val rawLyrics = lyricsEntity?.lyrics?.trim()
+                        var rawLyrics = lyricsEntity?.lyrics?.trim()
+
+                        if (rawLyrics == null) {
+                            val metadata = withContext(Dispatchers.Main) { session.player.currentMediaItem?.metadata }
+                            if (metadata != null) {
+                                val lyricsWithProvider = lyricsHelper.getLyrics(metadata)
+                                rawLyrics = lyricsWithProvider.lyrics.trim()
+
+                                database.query {
+                                    upsert(
+                                        LyricsEntity(
+                                            id = metadata.id,
+                                            lyrics = lyricsWithProvider.lyrics,
+                                            provider = lyricsWithProvider.provider,
+                                        )
+                                    )
+                                }
+                                withContext(Dispatchers.Main) {
+                                    session.notifyChildrenChanged(
+                                        MusicService.CURRENT_LYRICS,
+                                        3,
+                                        null
+                                    )
+                                }
+                                lastMediaId = null
+                            }
+                        }
 
                         if (rawLyrics == null || rawLyrics == LyricsEntity.LYRICS_NOT_FOUND) {
                             return@future LibraryResult.ofItemList(
@@ -590,7 +619,6 @@ constructor(
         mediaId: String,
     ): ListenableFuture<LibraryResult<MediaItem>> =
         scope.future(Dispatchers.IO) {
-            // 1. Gestisci il nodo delle Lyrics
             if (mediaId == MusicService.CURRENT_LYRICS) {
                 val item = MediaItem.Builder()
                     .setMediaId(MusicService.CURRENT_LYRICS)
@@ -607,9 +635,7 @@ constructor(
 
             database.song(mediaId).firstOrNull()?.toMediaItem()?.let {
                 return@future LibraryResult.ofItem(it, null)
-            }
-
-            LibraryResult.ofError(SessionError.ERROR_BAD_VALUE)
+            } ?: LibraryResult.ofError(SessionError.ERROR_UNKNOWN)
         }
 
     override fun onSearch(
