@@ -126,6 +126,10 @@ constructor(
                                 currentLyrics = null
                                 currentOffset = 0L
                             }
+
+                            withContext(Dispatchers.Main) {
+                                session.notifyChildrenChanged(MusicService.CURRENT_LYRICS, 3, null)
+                            }
                         }
                     }
 
@@ -273,13 +277,18 @@ constructor(
                                         drawableUri(R.drawable.queue_music),
                                         MediaMetadata.MEDIA_TYPE_FOLDER_PLAYLISTS,
                                     )
-                                    AndroidAutoSection.CURRENT_LYRICS -> browsableMediaItem(
-                                        MusicService.CURRENT_LYRICS,
-                                        "Lyrics",
-                                        null,
-                                        drawableUri(R.drawable.lyrics),
-                                        MediaMetadata.MEDIA_TYPE_PLAYLIST,
-                                    )
+                                    AndroidAutoSection.CURRENT_LYRICS -> {
+                                        val songTitle = withContext(Dispatchers.Main) { session.player.currentMediaItem?.mediaMetadata?.title }
+                                        val displayTitle = if (songTitle != null) "Lyrics ▶ $songTitle" else "Lyrics"
+
+                                        browsableMediaItem(
+                                            MusicService.CURRENT_LYRICS,
+                                            displayTitle,
+                                            null,
+                                            drawableUri(R.drawable.lyrics),
+                                            MediaMetadata.MEDIA_TYPE_PLAYLIST,
+                                        )
+                                    }
                                 }
                             }
                     }
@@ -620,11 +629,14 @@ constructor(
     ): ListenableFuture<LibraryResult<MediaItem>> =
         scope.future(Dispatchers.IO) {
             if (mediaId == MusicService.CURRENT_LYRICS) {
+                val songTitle = withContext(Dispatchers.Main) { session.player.currentMediaItem?.mediaMetadata?.title }
+                val displayTitle = if (songTitle != null) "Lyrics ▶ $songTitle" else "Lyrics"
+
                 val item = MediaItem.Builder()
                     .setMediaId(MusicService.CURRENT_LYRICS)
                     .setMediaMetadata(
                         MediaMetadata.Builder()
-                            .setTitle("Lyrics")
+                            .setTitle(displayTitle)
                             .setIsBrowsable(true)
                             .setIsPlayable(false)
                             .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
