@@ -133,8 +133,8 @@ constructor(
                         }
                     }
 
-                    if (currentLyrics != null && currentLyrics!!.isNotEmpty()) {
-                        val newIndex = LyricsUtils.findCurrentLineIndex(currentLyrics!!, position + currentOffset)
+                    if (!currentLyrics.isNullOrEmpty()) {
+                        val newIndex = LyricsUtils.findCurrentLineIndex(currentLyrics, position + currentOffset)
                         if (newIndex != lastLineIndex) {
                             lastLineIndex = newIndex
                             Log.d("LYRICS_DEBUG", "Invio notifica per ID: ${MusicService.CURRENT_LYRICS}")
@@ -457,6 +457,8 @@ constructor(
                             )
                         }
 
+                        val allLangs = listOf("Japanese", "Korean", "Chinese", "Hindi", "Ukrainian", "Russian", "Serbian", "Bulgarian", "Belarusian", "Kyrgyz", "Macedonian")
+
                         if (rawLyrics.startsWith("[")) {
                             // TESTO SINCRONIZZATO
                             val parsedLines = LyricsUtils.parseLyrics(rawLyrics)
@@ -475,13 +477,21 @@ constructor(
                                 val titleText = if (isCurrent) "▶ ${entry.text}" else entry.text
                                 val displayTitle = titleText.takeIf { entry.text.isNotBlank() } ?: (if (isCurrent) "▶ 🎶" else "🎶")
 
+                                val romanizedText = LyricsUtils.romanize(
+                                    text = rawLyrics,
+                                    line = entry.text,
+                                    enabledLanguages = allLangs,
+                                    romanizeCyrillicByLine = true
+                                )
+                                val subtitleText = romanizedText?.takeIf { it.isNotBlank() }
+
                                 items.add(
                                     MediaItem.Builder()
                                         .setMediaId("${MusicService.CURRENT_LYRICS}/lyrics_line_$i")
                                         .setMediaMetadata(
                                             MediaMetadata.Builder()
                                                 .setTitle(displayTitle)
-                                                .setSubtitle(if (isCurrent) "Riproduzione attuale" else null)
+                                                .setSubtitle(subtitleText)
                                                 .setIsPlayable(false)
                                                 .setIsBrowsable(false)
                                                 .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
@@ -494,28 +504,48 @@ constructor(
                         } else {
                             // TESTO NON SINCRONIZZATO
                             val lines = rawLyrics.lines().filter { it.isNotBlank() }
-                            lines.take(20).forEachIndexed { index, line ->
+                            lines.forEachIndexed { index, line ->
+                                val romanizedText = LyricsUtils.romanize(
+                                    text = rawLyrics,
+                                    line = line,
+                                    enabledLanguages = allLangs,
+                                    romanizeCyrillicByLine = true
+                                )
+                                val subtitleText = romanizedText?.takeIf { it.isNotBlank() }
+
                                 items.add(
-                                    browsableMediaItem(
-                                        id = "${MusicService.CURRENT_LYRICS}/lyrics_line_$index",
-                                        title = line,
-                                        subtitle = null,
-                                        iconUri = drawableUri(R.drawable.lyrics),
-                                        mediaType = MediaMetadata.MEDIA_TYPE_MUSIC
-                                    )
+                                    MediaItem.Builder()
+                                        .setMediaId("${MusicService.CURRENT_LYRICS}/lyrics_line_$index")
+                                        .setMediaMetadata(
+                                            MediaMetadata.Builder()
+                                                .setTitle(line)
+                                                .setSubtitle(subtitleText)
+                                                .setIsPlayable(false)
+                                                .setIsBrowsable(false)
+                                                .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
+                                                .setArtworkUri(drawableUri(R.drawable.lyrics))
+                                                .build()
+                                        )
+                                        .build()
                                 )
                             }
                         }
 
                         if (items.isEmpty()) {
                             items.add(
-                                browsableMediaItem(
-                                    id = "${MusicService.CURRENT_LYRICS}/lyrics_empty",
-                                    title = "Testo vuoto",
-                                    subtitle = null,
-                                    iconUri = drawableUri(R.drawable.lyrics),
-                                    mediaType = MediaMetadata.MEDIA_TYPE_MUSIC
-                                )
+                                MediaItem.Builder()
+                                    .setMediaId("${MusicService.CURRENT_LYRICS}/lyrics_empty")
+                                    .setMediaMetadata(
+                                        MediaMetadata.Builder()
+                                            .setTitle("Testo vuoto")
+                                            .setSubtitle(null)
+                                            .setIsPlayable(false)
+                                            .setIsBrowsable(false)
+                                            .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
+                                            .setArtworkUri(drawableUri(R.drawable.lyrics))
+                                            .build()
+                                    )
+                                    .build()
                             )
                         }
 
@@ -967,21 +997,6 @@ constructor(
                         searchResults.map { it.toMediaItem() },
                         if (targetIndex >= 0) targetIndex else 0,
                         C.TIME_UNSET
-                    )
-                }
-
-                MusicService.CURRENT_LYRICS -> {
-                    val player = mediaSession.player
-                    val currentPlaylist = mutableListOf<MediaItem>()
-
-                    for (i in 0 until player.mediaItemCount) {
-                        currentPlaylist.add(player.getMediaItemAt(i))
-                    }
-
-                    MediaItemsWithStartPosition(
-                        currentPlaylist,
-                        player.currentMediaItemIndex,
-                        player.currentPosition
                     )
                 }
 
