@@ -378,20 +378,30 @@ constructor(
 
                     MusicService.CURRENT_LYRICS -> {
                         withContext(Dispatchers.Main) { startLyricsSyncJob(session) }
-                        val currentMediaId = withContext(Dispatchers.Main) { session.player.currentMediaItem?.mediaId }
+                        val currentMedia = withContext(Dispatchers.Main) { session.player.currentMediaItem }
+                        val currentMediaId = currentMedia?.mediaId
+                        val songTitle = currentMedia?.mediaMetadata?.title
+                        val songArtist = currentMedia?.mediaMetadata?.artist
+                        val artworkUri = currentMedia?.mediaMetadata?.artworkUri
+
                         val currentPosition = withContext(Dispatchers.Main) { session.player.currentPosition }
-                        val songTitle = withContext(Dispatchers.Main) { session.player.currentMediaItem?.mediaMetadata?.title }
 
                         if (currentMediaId == null) {
                             return@future LibraryResult.ofItemList(
                                 listOf(
-                                    browsableMediaItem(
-                                        id = "${MusicService.CURRENT_LYRICS}/no_song_playing",
-                                        title = context.getString(R.string.no_song_playing),
-                                        subtitle = null,
-                                        iconUri = drawableUri(R.drawable.lyrics),
-                                        mediaType = MediaMetadata.MEDIA_TYPE_MUSIC
-                                    )
+                                    MediaItem.Builder()
+                                        .setMediaId("${MusicService.CURRENT_LYRICS}/no_song_playing")
+                                        .setMediaMetadata(
+                                            MediaMetadata.Builder()
+                                                .setTitle(context.getString(R.string.no_song_playing))
+                                                .setSubtitle(null)
+                                                .setIsPlayable(false)
+                                                .setIsBrowsable(false)
+                                                .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
+                                                .setArtworkUri(drawableUri(R.drawable.lyrics))
+                                                .build()
+                                        )
+                                        .build()
                                 ), params
                             )
                         }
@@ -447,10 +457,12 @@ constructor(
                                     .setMediaId("${MusicService.CURRENT_LYRICS}/title_header")
                                     .setMediaMetadata(
                                         MediaMetadata.Builder()
-                                            .setTitle("🎤 $songTitle")
+                                            .setTitle("$songTitle")
+                                            .setSubtitle("$songArtist")
                                             .setIsPlayable(false)
                                             .setIsBrowsable(false)
                                             .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
+                                            .setArtworkUri(artworkUri)
                                             .build()
                                     )
                                     .build()
@@ -819,8 +831,13 @@ constructor(
     ): ListenableFuture<MediaItemsWithStartPosition> =
         scope.future {
             val defaultResult = MediaItemsWithStartPosition(emptyList(), startIndex, startPositionMs)
-            val path = mediaItems.firstOrNull()?.mediaId?.split("/")
-                ?: return@future defaultResult
+            val voiceQuery = mediaItems.firstOrNull()?.requestMetadata?.searchQuery
+
+            val path = if (!voiceQuery.isNullOrBlank()) {
+                listOf(MusicService.SEARCH, voiceQuery, "")
+            } else {
+                mediaItems.firstOrNull()?.mediaId?.split("/")
+            } ?: return@future defaultResult
 
             when (path.firstOrNull()) {
                 MusicService.SONG -> {
