@@ -9,7 +9,6 @@ import android.content.ContentResolver
 import android.content.Context
 import android.net.Uri
 import android.os.Bundle
-import android.util.Log
 import androidx.annotation.DrawableRes
 import androidx.core.net.toUri
 import androidx.media3.common.C
@@ -74,6 +73,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
+import kotlin.collections.firstOrNull
 
 class MediaLibrarySessionCallback
 @Inject
@@ -128,7 +128,7 @@ constructor(
                             }
 
                             withContext(Dispatchers.Main) {
-                                session.notifyChildrenChanged(MusicService.CURRENT_LYRICS, 3, null)
+                                session.notifyChildrenChanged(MusicService.LYRICS, 3, null)
                             }
                         }
                     }
@@ -137,8 +137,7 @@ constructor(
                         val newIndex = LyricsUtils.findCurrentLineIndex(currentLyrics, position + currentOffset)
                         if (newIndex != lastLineIndex) {
                             lastLineIndex = newIndex
-                            Log.d("LYRICS_DEBUG", "Invio notifica per ID: ${MusicService.CURRENT_LYRICS}")
-                            session.notifyChildrenChanged(MusicService.CURRENT_LYRICS, 3, null)
+                            session.notifyChildrenChanged(MusicService.LYRICS, 3, null)
                         }
                     }
                 }
@@ -228,7 +227,6 @@ constructor(
         params: MediaLibraryService.LibraryParams?,
     ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> =
         scope.future(Dispatchers.IO) {
-            Log.d("LYRICS_DEBUG", "onGetChildren chiamato per parentId: $parentId")
             LibraryResult.ofItemList(
                 when (parentId) {
                     MusicService.ROOT -> {
@@ -277,9 +275,9 @@ constructor(
                                         drawableUri(R.drawable.queue_music),
                                         MediaMetadata.MEDIA_TYPE_FOLDER_PLAYLISTS,
                                     )
-                                    AndroidAutoSection.CURRENT_LYRICS -> browsableMediaItem(
-                                        MusicService.CURRENT_LYRICS,
-                                        "Lyrics",
+                                    AndroidAutoSection.LYRICS -> browsableMediaItem(
+                                        MusicService.LYRICS,
+                                        context.getString(R.string.lyrics),
                                         null,
                                         drawableUri(R.drawable.lyrics),
                                         MediaMetadata.MEDIA_TYPE_PLAYLIST,
@@ -376,7 +374,7 @@ constructor(
                         localItems
                     }
 
-                    MusicService.CURRENT_LYRICS -> {
+                    MusicService.LYRICS -> {
                         withContext(Dispatchers.Main) { startLyricsSyncJob(session) }
                         val currentMedia = withContext(Dispatchers.Main) { session.player.currentMediaItem }
                         val currentMediaId = currentMedia?.mediaId
@@ -390,7 +388,7 @@ constructor(
                             return@future LibraryResult.ofItemList(
                                 listOf(
                                     MediaItem.Builder()
-                                        .setMediaId("${MusicService.CURRENT_LYRICS}/no_song_playing")
+                                        .setMediaId("${MusicService.LYRICS}/no_song_playing")
                                         .setMediaMetadata(
                                             MediaMetadata.Builder()
                                                 .setTitle(context.getString(R.string.no_song_playing))
@@ -426,7 +424,7 @@ constructor(
                                 }
                                 withContext(Dispatchers.Main) {
                                     session.notifyChildrenChanged(
-                                        MusicService.CURRENT_LYRICS,
+                                        MusicService.LYRICS,
                                         3,
                                         null
                                     )
@@ -438,13 +436,19 @@ constructor(
                         if (rawLyrics == null || rawLyrics == LyricsEntity.LYRICS_NOT_FOUND) {
                             return@future LibraryResult.ofItemList(
                                 listOf(
-                                    browsableMediaItem(
-                                        id = "${MusicService.CURRENT_LYRICS}/lyrics_not_found",
-                                        title = context.getString(R.string.lyrics_not_found),
-                                        subtitle = null,
-                                        iconUri = drawableUri(R.drawable.lyrics),
-                                        mediaType = MediaMetadata.MEDIA_TYPE_MUSIC
-                                    )
+                                    MediaItem.Builder()
+                                        .setMediaId("${MusicService.LYRICS}/lyrics_not_found")
+                                        .setMediaMetadata(
+                                            MediaMetadata.Builder()
+                                                .setTitle(context.getString(R.string.lyrics_not_found))
+                                                .setSubtitle(null)
+                                                .setIsPlayable(false)
+                                                .setIsBrowsable(false)
+                                                .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
+                                                .setArtworkUri(drawableUri(R.drawable.lyrics))
+                                                .build()
+                                        )
+                                        .build()
                                 ), params
                             )
                         }
@@ -454,7 +458,7 @@ constructor(
                         if (songTitle != null) {
                             items.add(
                                 MediaItem.Builder()
-                                    .setMediaId("${MusicService.CURRENT_LYRICS}/title_header")
+                                    .setMediaId("${MusicService.LYRICS}/title_header")
                                     .setMediaMetadata(
                                         MediaMetadata.Builder()
                                             .setTitle("$songTitle")
@@ -499,7 +503,7 @@ constructor(
 
                                 items.add(
                                     MediaItem.Builder()
-                                        .setMediaId("${MusicService.CURRENT_LYRICS}/lyrics_line_$i")
+                                        .setMediaId("${MusicService.LYRICS}/lyrics_line_$i")
                                         .setMediaMetadata(
                                             MediaMetadata.Builder()
                                                 .setTitle(displayTitle)
@@ -527,7 +531,7 @@ constructor(
 
                                 items.add(
                                     MediaItem.Builder()
-                                        .setMediaId("${MusicService.CURRENT_LYRICS}/lyrics_line_$index")
+                                        .setMediaId("${MusicService.LYRICS}/lyrics_line_$index")
                                         .setMediaMetadata(
                                             MediaMetadata.Builder()
                                                 .setTitle(line)
@@ -546,7 +550,7 @@ constructor(
                         if (items.isEmpty()) {
                             items.add(
                                 MediaItem.Builder()
-                                    .setMediaId("${MusicService.CURRENT_LYRICS}/lyrics_empty")
+                                    .setMediaId("${MusicService.LYRICS}/lyrics_empty")
                                     .setMediaMetadata(
                                         MediaMetadata.Builder()
                                             .setTitle("Testo vuoto")
@@ -682,18 +686,17 @@ constructor(
         mediaId: String,
     ): ListenableFuture<LibraryResult<MediaItem>> =
         scope.future(Dispatchers.IO) {
-            if (mediaId == MusicService.CURRENT_LYRICS) {
-                val item = MediaItem.Builder()
-                    .setMediaId(MusicService.CURRENT_LYRICS)
-                    .setMediaMetadata(
-                        MediaMetadata.Builder()
-                            .setTitle("Lyrics")
-                            .setIsBrowsable(true)
-                            .setIsPlayable(false)
-                            .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
-                            .build()
-                    ).build()
-                return@future LibraryResult.ofItem(item, null)
+            if (mediaId == MusicService.LYRICS) {
+                return@future LibraryResult.ofItem(
+                    browsableMediaItem(
+                        MusicService.LYRICS,
+                        context.getString(R.string.lyrics),
+                        null,
+                        null,
+                        MediaMetadata.MEDIA_TYPE_PLAYLIST,
+                    ),
+                    null
+                )
             }
 
             database.song(mediaId).firstOrNull()?.toMediaItem()?.let {
@@ -810,17 +813,6 @@ constructor(
             }
         }
     }
-
-    /*
-    override fun onSubscribe(
-        session: MediaLibrarySession,
-        browser: MediaSession.ControllerInfo,
-        parentId: String,
-        params: MediaLibraryService.LibraryParams?
-    ): ListenableFuture<LibraryResult<Void>> {
-        Log.d("LYRICS_DEBUG", "IL CLIENT SI È ISCRITTO A: $parentId (Browser: ${browser.packageName})")
-        return Futures.immediateFuture(LibraryResult.ofVoid())
-    }*/
 
     override fun onSetMediaItems(
         mediaSession: MediaSession,
