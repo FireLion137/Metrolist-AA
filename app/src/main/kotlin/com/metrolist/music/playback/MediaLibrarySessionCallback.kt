@@ -476,7 +476,7 @@ constructor(
                         val allLangs = listOf("Japanese", "Korean", "Chinese", "Hindi", "Ukrainian", "Russian", "Serbian", "Bulgarian", "Belarusian", "Kyrgyz", "Macedonian")
 
                         if (rawLyrics.startsWith("[")) {
-                            // TESTO SINCRONIZZATO
+                            // Synchronized Text
                             val parsedLines = LyricsUtils.parseLyrics(rawLyrics)
                             val lyricsOffset = database.song(currentMediaId).firstOrNull()?.song?.lyricsOffset?.toLong() ?: 0L
 
@@ -518,7 +518,7 @@ constructor(
                                 )
                             }
                         } else {
-                            // TESTO NON SINCRONIZZATO
+                            // NOT Synchronized Text
                             val lines = rawLyrics.lines().filter { it.isNotBlank() }
                             lines.forEachIndexed { index, line ->
                                 val romanizedText = LyricsUtils.romanize(
@@ -550,10 +550,10 @@ constructor(
                         if (items.isEmpty()) {
                             items.add(
                                 MediaItem.Builder()
-                                    .setMediaId("${MusicService.LYRICS}/lyrics_empty")
+                                    .setMediaId("${MusicService.LYRICS}/lyrics_not_found")
                                     .setMediaMetadata(
                                         MediaMetadata.Builder()
-                                            .setTitle("Testo vuoto")
+                                            .setTitle(context.getString(R.string.lyrics_not_found))
                                             .setSubtitle(null)
                                             .setIsPlayable(false)
                                             .setIsBrowsable(false)
