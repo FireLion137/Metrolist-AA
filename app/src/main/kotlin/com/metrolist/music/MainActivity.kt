@@ -68,7 +68,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -338,19 +338,23 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        if (dataStore.get(StopMusicOnTaskClearKey, false) &&
-            playerConnection?.isPlaying?.value == true &&
-            isFinishing
-        ) {
-            stopService(Intent(this, MusicService::class.java))
-        }
-        
+        // Use effective playing state so Cast (local player paused, remote playing) is included.
+        val stopServiceOnClear =
+            dataStore.get(StopMusicOnTaskClearKey, false) &&
+                playerConnection?.isEffectivelyPlaying?.value == true &&
+                isFinishing
+
         // Full cleanup - only on actual destroy
         playerConnection?.dispose()
         playerConnection = null
         playerConnectionSnapshot = null
-        
+
+        // Unbind before stopService: a started+bound service does not stop until all clients unbind.
         safeUnbindService("onDestroy()")
+
+        if (stopServiceOnClear) {
+            stopService(Intent(this, MusicService::class.java))
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -628,7 +632,7 @@ class MainActivity : ComponentActivity() {
                 }
 
                 val homeViewModel: HomeViewModel = hiltViewModel()
-                val accountImageUrl by homeViewModel.accountImageUrl.collectAsState()
+                val accountImageUrl by homeViewModel.accountImageUrl.collectAsStateWithLifecycle()
                 val navBackStackEntry by navController.currentBackStackEntryAsState()
                 val (previousTab, setPreviousTab) = rememberSaveable { mutableStateOf("home") }
 
@@ -892,7 +896,7 @@ class MainActivity : ComponentActivity() {
                 var showAccountDialog by remember { mutableStateOf(false) }
 
                 val pauseListenHistory by rememberPreference(PauseListenHistoryKey, defaultValue = false)
-                val eventCount by database.eventCount().collectAsState(initial = 0)
+                val eventCount by database.eventCount().collectAsStateWithLifecycle(initialValue = 0)
                 val showHistoryButton =
                     remember(pauseListenHistory, eventCount) {
                         !(pauseListenHistory && eventCount == 0)

@@ -44,7 +44,6 @@ import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -76,6 +75,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastAny
 import androidx.compose.ui.util.fastForEachReversed
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
@@ -105,7 +105,6 @@ import com.metrolist.music.utils.rememberPreference
 import com.metrolist.music.viewmodels.OnlinePlaylistViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class, ExperimentalMaterial3ExpressiveApi::class)
@@ -122,15 +121,15 @@ fun OnlinePlaylistScreen(
     val isListenTogetherGuest = listenTogetherManager?.let { it.isInRoom && !it.isHost } ?: false
     val coroutineScope = rememberCoroutineScope()
 
-    val isPlaying by playerConnection.isEffectivelyPlaying.collectAsState()
-    val mediaMetadata by playerConnection.mediaMetadata.collectAsState()
+    val isPlaying by playerConnection.isEffectivelyPlaying.collectAsStateWithLifecycle()
+    val mediaMetadata by playerConnection.mediaMetadata.collectAsStateWithLifecycle()
 
-    val playlist by viewModel.playlist.collectAsState()
-    val songs by viewModel.playlistSongs.collectAsState()
-    val dbPlaylist by viewModel.dbPlaylist.collectAsState()
-    val isLoading by viewModel.isLoading.collectAsState()
-    val isLoadingMore by viewModel.isLoadingMore.collectAsState()
-    val error by viewModel.error.collectAsState()
+    val playlist by viewModel.playlist.collectAsStateWithLifecycle()
+    val songs by viewModel.playlistSongs.collectAsStateWithLifecycle()
+    val dbPlaylist by viewModel.dbPlaylist.collectAsStateWithLifecycle()
+    val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
+    val isLoadingMore by viewModel.isLoadingMore.collectAsStateWithLifecycle()
+    val error by viewModel.error.collectAsStateWithLifecycle()
     val isPodcastPlaylist = viewModel.isPodcastPlaylist
 
     val hideExplicit by rememberPreference(key = HideExplicitKey, defaultValue = false)
@@ -576,41 +575,42 @@ private fun OnlinePlaylistHeader(
         ) {
             // Like Button - Smaller secondary button
             Surface(
-                 onClick = {
-                     if (dbPlaylist != null) {
-                         database.transaction {
-                             val currentPlaylist = dbPlaylist.playlist
-                             update(currentPlaylist, playlist)
-                             update(currentPlaylist.toggleLike())
-                         }
-                     } else {
-                         coroutineScope.launch(Dispatchers.IO) {
-                             val playlistEntity =
-                                 PlaylistEntity(
-                                     name = playlist.title,
-                                     browseId = playlist.id,
-                                     thumbnailUrl = playlist.thumbnail,
-                                     isEditable = playlist.isEditable,
-                                     remoteSongCount =
-                                         playlist.songCountText?.let {
-                                             Regex("""\d+""").find(it)?.value?.toIntOrNull()
-                                         },
-                                     playEndpointParams = playlist.playEndpoint?.params,
-                                     shuffleEndpointParams = playlist.shuffleEndpoint?.params,
-                                     radioEndpointParams = playlist.radioEndpoint?.params,
-                                 ).toggleLike()
-                             val songMetadata = songs.map { it.toMediaMetadata() }
-                             database.withTransaction {
-                                 insert(playlistEntity)
-                                 songMetadata.onEach { insert(it) }
-                                 val songIds = songMetadata.map { it.id to it.setVideoId }
-                                 val createdPlaylist = database.playlist(playlistEntity.id).first()
-                                     ?: throw IllegalStateException("Failed to create playlist")
-                                 database.addSongsToPlaylist(createdPlaylist, songIds)
-                             }
-                         }
-                     }
-                 },
+                onClick = {
+                    if (dbPlaylist != null) {
+                        database.transaction {
+                            val currentPlaylist = dbPlaylist.playlist
+                            update(currentPlaylist, playlist)
+                            update(currentPlaylist.toggleLike())
+                        }
+                    } else {
+                        coroutineScope.launch(Dispatchers.IO) {
+                            val playlistEntity =
+                                PlaylistEntity(
+                                    name = playlist.title,
+                                    browseId = playlist.id,
+                                    thumbnailUrl = playlist.thumbnail,
+                                    isEditable = playlist.isEditable,
+                                    remoteSongCount =
+                                        playlist.songCountText?.let {
+                                            Regex("""\d+""").find(it)?.value?.toIntOrNull()
+                                        },
+                                    playEndpointParams = playlist.playEndpoint?.params,
+                                    shuffleEndpointParams = playlist.shuffleEndpoint?.params,
+                                    radioEndpointParams = playlist.radioEndpoint?.params,
+                                ).toggleLike()
+                            val songMetadata = songs.map { it.toMediaMetadata() }
+                            database.withTransaction {
+                                insert(playlistEntity)
+                                songMetadata.onEach { insert(it) }
+                                val songIds = songMetadata.map { it.id to it.setVideoId }
+                                val createdPlaylist =
+                                    database.playlistBlocking(playlistEntity.id)
+                                        ?: throw IllegalStateException("Failed to create playlist")
+                                database.addSongsToPlaylist(createdPlaylist, songIds)
+                            }
+                        }
+                    }
+                },
                 shape = CircleShape,
                 color = MaterialTheme.colorScheme.surfaceVariant,
                 modifier = Modifier.size(48.dp),

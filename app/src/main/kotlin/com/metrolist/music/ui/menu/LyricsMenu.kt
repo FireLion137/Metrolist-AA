@@ -6,9 +6,6 @@
 package com.metrolist.music.ui.menu
 
 import android.app.SearchManager
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
 import android.widget.Toast
@@ -43,7 +40,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -65,8 +62,8 @@ import com.metrolist.music.LocalDatabase
 import com.metrolist.music.R
 import com.metrolist.music.db.entities.LyricsEntity
 import com.metrolist.music.db.entities.SongEntity
+import com.metrolist.music.lyrics.LyricsResyncHelper
 import com.metrolist.music.lyrics.LyricsTranslationHelper
-import com.metrolist.music.lyrics.LyricsUtils
 import com.metrolist.music.models.MediaMetadata
 import com.metrolist.music.ui.component.DefaultDialog
 import com.metrolist.music.ui.component.ListDialog
@@ -118,7 +115,7 @@ fun LyricsMenu(
     
     // Observe the authoritative translation-active state from the singleton; this persists
     // correctly across menu open/close cycles and avoids the lyricsProvider() race condition.
-    val hasTranslations by LyricsTranslationHelper.hasActiveTranslations.collectAsState()
+    val hasTranslations by LyricsTranslationHelper.hasActiveTranslations.collectAsStateWithLifecycle()
 
     var showEditDialog by rememberSaveable {
         mutableStateOf(false)
@@ -173,7 +170,7 @@ fun LyricsMenu(
             )
         }
 
-    val isNetworkAvailable by viewModel.isNetworkAvailable.collectAsState()
+    val isNetworkAvailable by viewModel.isNetworkAvailable.collectAsStateWithLifecycle()
 
     if (showSearchDialog) {
         DefaultDialog(
@@ -259,8 +256,8 @@ fun LyricsMenu(
     }
 
     if (showSearchResultDialog) {
-        val results by viewModel.results.collectAsState()
-        val isLoading by viewModel.isLoading.collectAsState()
+        val results by viewModel.results.collectAsStateWithLifecycle()
+        val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
 
         var expandedItemIndex by rememberSaveable {
             mutableIntStateOf(-1)
@@ -441,28 +438,16 @@ fun LyricsMenu(
                         NewAction(
                             icon = {
                                 Icon(
-                                    painter = painterResource(R.drawable.content_copy),
+                                    painter = painterResource(R.drawable.sync),
                                     contentDescription = null,
                                     modifier = Modifier.size(28.dp),
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             },
-                            text = stringResource(R.string.copy),
+                            text = stringResource(R.string.resync),
                             onClick = {
-                                lyricsProvider()?.lyrics?.let { lyrics ->
-                                    val plainLyrics =
-                                        if (lyrics.startsWith("[")) {
-                                            LyricsUtils.parseLyrics(lyrics)
-                                                .joinToString("\n") { it.text }
-                                        } else {
-                                            lyrics
-                                        }
-
-                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                    val clip = ClipData.newPlainText("Lyrics", plainLyrics)
-                                    clipboard.setPrimaryClip(clip)
-                                    Toast.makeText(context, R.string.copied_to_clipboard, Toast.LENGTH_SHORT).show()
-                                }
+                                LyricsResyncHelper.triggerResync()
+                                onDismiss()
                             },
                         ),
                     ),
