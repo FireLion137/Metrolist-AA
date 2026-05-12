@@ -110,8 +110,8 @@ val AudioQualityKey = stringPreferencesKey("audioQuality")
 
 enum class AudioQuality {
     AUTO,
-    HIGH,
     LOW,
+    HIGH,
     VERY_HIGH,
 }
 
@@ -126,6 +126,18 @@ val ShuffleModeKey = booleanPreferencesKey("shuffleMode")
 val SkipSilenceKey = booleanPreferencesKey("skipSilence")
 val SkipSilenceInstantKey = booleanPreferencesKey("skipSilenceInstant")
 val AudioNormalizationKey = booleanPreferencesKey("audioNormalization")
+
+val LoudnessLevelKey = stringPreferencesKey("loudnessLevel")
+
+enum class LoudnessLevel(
+    val targetLufs: Float
+) {
+    AGGRESSIVE(-7f),
+    LOUD(-11f),
+    BALANCED(-14f),
+    QUIET(-19f),
+}
+
 val AutoLoadMoreKey = booleanPreferencesKey("autoLoadMore")
 val DisableLoadMoreWhenRepeatAllKey = booleanPreferencesKey("disableLoadMoreWhenRepeatAll")
 val AutoDownloadOnLikeKey = booleanPreferencesKey("autoDownloadOnLike")
@@ -227,6 +239,7 @@ val LastPlaylistSyncKey = longPreferencesKey("last_playlist_sync")
 val LastFullSyncKey = longPreferencesKey("last_full_sync")
 val LastWeeklyMostPlaylistSyncKey = longPreferencesKey("last_weekly_most_playlist_sync")
 val LastMonthlyMostPlaylistSyncKey = longPreferencesKey("last_monthly_most_playlist_sync")
+val ShowMostStatsPlaylistsKey = booleanPreferencesKey("show_most_stats_playlists")
 
 // Sync cooldown in seconds (30 minutes)
 const val SYNC_COOLDOWN = 30 * 60L

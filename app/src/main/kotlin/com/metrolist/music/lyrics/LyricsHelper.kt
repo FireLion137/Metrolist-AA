@@ -8,10 +8,7 @@ package com.metrolist.music.lyrics
 import android.content.Context
 import android.util.LruCache
 import com.metrolist.music.constants.LyricsProviderOrderKey
-import com.metrolist.music.constants.PreferredLyricsProvider
-import com.metrolist.music.constants.PreferredLyricsProviderKey
 import com.metrolist.music.db.entities.LyricsEntity.Companion.LYRICS_NOT_FOUND
-import com.metrolist.music.extensions.toEnum
 import com.metrolist.music.models.MediaMetadata
 import com.metrolist.music.utils.NetworkConnectivityObserver
 import com.metrolist.music.utils.dataStore
@@ -21,20 +18,16 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import timber.log.Timber
 import javax.inject.Inject
 
-private const val MAX_LYRICS_FETCH_MS = 30000L
+private const val MAX_LYRICS_FETCH_MS = 25000L
+private const val PER_PROVIDER_TIMEOUT_MS = 8000L
 private const val PROVIDER_NONE = ""
 
 class LyricsHelper
@@ -46,48 +39,11 @@ constructor(
     val preferred =
         context.dataStore.data
             .map { preferences ->
-                Timber.tag("LyricsHelper")
-                    .d("Current Lyrics Order: ${preferences[LyricsProviderOrderKey] ?: ""}")
                 resolveLyricsProviders(preferences)
             }.distinctUntilChanged()
 
     private val cache = LruCache<String, List<LyricsResult>>(MAX_CACHE_SIZE)
     private var currentLyricsJob: Job? = null
-
-    private fun CoroutineScope.launchProviderJob(
-        provider: LyricsProvider,
-        index: Int,
-        channel: Channel<Pair<Int, LyricsWithProvider?>>,
-        mediaMetadata: MediaMetadata,
-        cleanedTitle: String,
-    ): Job = launch {
-        try {
-            val providerResult = provider.getLyrics(
-                context,
-                mediaMetadata.id,
-                cleanedTitle,
-                mediaMetadata.artists.joinToString { it.name },
-                mediaMetadata.duration,
-                mediaMetadata.album?.title,
-            )
-            if (providerResult.isSuccess) {
-                Timber.tag("LyricsHelper").i("Got lyrics from ${provider.name}")
-                val filtered = LyricsUtils.filterLyricsCreditLines(providerResult.getOrNull()!!)
-                channel.send(Pair(index, LyricsWithProvider(filtered, provider.name)))
-            } else {
-                Timber.tag("LyricsHelper")
-                    .w("${provider.name} failed: ${providerResult.exceptionOrNull()?.message}")
-                channel.send(Pair(index, null))
-            }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            Timber.tag("LyricsHelper").w("${provider.name} threw: ${e.message}")
-            channel.send(Pair(index, null))
-        }
-    }
-
-
 
     suspend fun getLyrics(mediaMetadata: MediaMetadata): LyricsWithProvider {
         currentLyricsJob?.cancel()
@@ -101,12 +57,9 @@ constructor(
             .map { preferences -> resolveLyricsProviders(preferences) }
             .first()
 
-        // Check network connectivity before making network requests
-        // Use synchronous check as fallback if flow doesn't emit
         val isNetworkAvailable = try {
             networkConnectivity.isCurrentlyConnected()
         } catch (e: Exception) {
-            // If network check fails, try to proceed anyway
             true
         }
 
@@ -118,55 +71,41 @@ constructor(
             val cleanedTitle = LyricsUtils.cleanTitleForSearch(mediaMetadata.title)
             val enabledProviders = orderedProviders.filter { it.isEnabled(context) }
 
-            // Try first provider
-            val GRACE_PERIOD_MS = 4000L
-            val TIER_SIZE = 2 // berapa provider per tier
+            Timber.tag("LyricsHelper").d("Starting sequential fetch for: $cleanedTitle by ${mediaMetadata.artists.joinToString { it.name }}")
+            Timber.tag("LyricsHelper").d("Enabled providers in order: ${enabledProviders.joinToString { it.name }}")
 
-            val channel = Channel<Pair<Int, LyricsWithProvider?>>(
-                capacity = enabledProviders.size
-            )
-            val launchedJobs = mutableListOf<Job>()
-
-            for (i in 0 until minOf(TIER_SIZE, enabledProviders.size)) {
-                launchedJobs += launchProviderJob(enabledProviders[i], i, channel, mediaMetadata, cleanedTitle)
-            }
-
-            var nextTierIndex = TIER_SIZE
-            var bestIndex = Int.MAX_VALUE
-            var bestResult: LyricsWithProvider? = null
-            val remaining = (0 until enabledProviders.size).toMutableSet()
-
-            // Collect timeout between priority
-            val collectJob = launch {
-                for ((index, res) in channel) {
-                    remaining.remove(index)
-                    if (res != null && index < bestIndex) {
-                        bestIndex = index
-                        bestResult = res
+            for (provider in enabledProviders) {
+                Timber.tag("LyricsHelper").d("Trying provider: ${provider.name}")
+                val providerResult = try {
+                    withTimeoutOrNull(PER_PROVIDER_TIMEOUT_MS) {
+                        provider.getLyrics(
+                            context,
+                            mediaMetadata.id,
+                            cleanedTitle,
+                            mediaMetadata.artists.joinToString { it.name },
+                            mediaMetadata.duration,
+                            mediaMetadata.album?.title,
+                        )
                     }
-                    if (remaining.none { it < bestIndex }) {
-                        channel.cancel()
-                        break
-                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Timber.tag("LyricsHelper").w("${provider.name} threw: ${e.message}")
+                    null
+                }
+
+                if (providerResult != null && providerResult.isSuccess) {
+                    Timber.tag("LyricsHelper").i("Got lyrics from ${provider.name}")
+                    val filtered = LyricsUtils.filterLyricsCreditLines(providerResult.getOrNull()!!)
+                    return@withTimeoutOrNull LyricsWithProvider(filtered, provider.name)
+                } else {
+                    val errorMsg = providerResult?.exceptionOrNull()?.message ?: "timeout or exception"
+                    Timber.tag("LyricsHelper").w("${provider.name} failed: $errorMsg")
                 }
             }
 
-            // launch if prev tier return none
-            while (nextTierIndex < enabledProviders.size && collectJob.isActive) {
-                delay(GRACE_PERIOD_MS)
-                if (bestResult == null && collectJob.isActive) {
-                    //previous still doesnt have them, do again
-                    for (i in nextTierIndex until minOf(nextTierIndex + TIER_SIZE, enabledProviders.size)) {
-                        launchedJobs += launchProviderJob(enabledProviders[i], i, channel, mediaMetadata, cleanedTitle)
-                    }
-                    nextTierIndex += TIER_SIZE
-                } else break // we got them skip it
-            }
-
-            collectJob.join()
-            launchedJobs.forEach { it.cancel() }
-
-            bestResult ?: LyricsWithProvider(LYRICS_NOT_FOUND, PROVIDER_NONE)
+            Timber.tag("LyricsHelper").w("No lyrics found after checking all providers")
+            LyricsWithProvider(LYRICS_NOT_FOUND, PROVIDER_NONE)
         }
 
         return result ?: LyricsWithProvider(LYRICS_NOT_FOUND, PROVIDER_NONE)
@@ -188,16 +127,13 @@ constructor(
             return
         }
 
-        // Check network connectivity before making network requests
-        // Use synchronous check as fallback if flow doesn't emit
         val isNetworkAvailable = try {
             networkConnectivity.isCurrentlyConnected()
         } catch (e: Exception) {
-            // If network check fails, try to proceed anyway
             true
         }
 
-        if (!isNetworkAvailable) return // Still try to proceed in case of false negative
+        if (!isNetworkAvailable) return
 
         val allResult = mutableListOf<LyricsResult>()
         currentLyricsJob = CoroutineScope(SupervisorJob()).launch {
@@ -207,37 +143,31 @@ constructor(
                 .first()
             val enabledProviders = allProviders.filter { it.isEnabled(context) }
 
-            // Separate LyricsPlus from other providers so it only runs conditionally
             val otherProviders = enabledProviders.filter { it.name != "LyricsPlus" }
             val lyricsPlusProvider = enabledProviders.find { it.name == "LyricsPlus" }
 
-            val callbackMutex = Mutex()
+            val callbackMutex = Any()
 
-            // Step 1: Fetch from all non-LyricsPlus providers concurrently
             val otherJobs = otherProviders.map { provider ->
                 launch {
                     try {
                         provider.getAllLyrics(context, mediaId, cleanedTitle, songArtists, duration, album) { lyrics ->
                             val filteredLyrics = LyricsUtils.filterLyricsCreditLines(lyrics)
                             val result = LyricsResult(provider.name, filteredLyrics)
-                            launch {
-                                callbackMutex.withLock {
-                                    allResult += result
-                                    callback(result)
-                                }
+                            synchronized(callbackMutex) {
+                                allResult += result
+                                callback(result)
                             }
                         }
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
-                        // Catch network-related exceptions like UnresolvedAddressException
                         reportException(e)
                     }
                 }
             }
             otherJobs.forEach { it.join() }
 
-            // Step 2: Only fetch from LyricsPlus if other providers combined returned <= 2 lyrics texts
             val otherLyricsCount = allResult.count { it.providerName != "LyricsPlus" }
             if (lyricsPlusProvider != null && otherLyricsCount <= 2) {
                 launch {
@@ -245,11 +175,9 @@ constructor(
                         lyricsPlusProvider.getAllLyrics(context, mediaId, cleanedTitle, songArtists, duration, album) { lyrics ->
                             val filteredLyrics = LyricsUtils.filterLyricsCreditLines(lyrics)
                             val result = LyricsResult(lyricsPlusProvider.name, filteredLyrics)
-                            launch {
-                                callbackMutex.withLock {
-                                    allResult += result
-                                    callback(result)
-                                }
+                            synchronized(callbackMutex) {
+                                allResult += result
+                                callback(result)
                             }
                         }
                     } catch (e: CancellationException) {
@@ -266,63 +194,14 @@ constructor(
         currentLyricsJob?.join()
     }
 
-    fun cancelCurrentLyricsJob() {
-        currentLyricsJob?.cancel()
-        currentLyricsJob = null
-    }
-
     private fun resolveLyricsProviders(preferences: androidx.datastore.preferences.core.Preferences): List<LyricsProvider> {
         val providerOrder = preferences[LyricsProviderOrderKey].orEmpty()
         if (providerOrder.isNotBlank()) {
             return LyricsProviderRegistry.getOrderedProviders(providerOrder)
         }
-        return when (preferences[PreferredLyricsProviderKey].toEnum(PreferredLyricsProvider.LRCLIB)) {
-            PreferredLyricsProvider.LRCLIB -> listOf(
-                LrcLibLyricsProvider,
-                BetterLyricsProvider,
-                PaxsenixLyricsProvider,
-                KuGouLyricsProvider,
-                LyricsPlusProvider,
-                YouTubeSubtitleLyricsProvider,
-                YouTubeLyricsProvider,
-            )
-            PreferredLyricsProvider.KUGOU -> listOf(
-                KuGouLyricsProvider,
-                BetterLyricsProvider,
-                PaxsenixLyricsProvider,
-                LrcLibLyricsProvider,
-                LyricsPlusProvider,
-                YouTubeSubtitleLyricsProvider,
-                YouTubeLyricsProvider,
-            )
-            PreferredLyricsProvider.BETTER_LYRICS -> listOf(
-                BetterLyricsProvider,
-                PaxsenixLyricsProvider,
-                LrcLibLyricsProvider,
-                KuGouLyricsProvider,
-                LyricsPlusProvider,
-                YouTubeSubtitleLyricsProvider,
-                YouTubeLyricsProvider,
-            )
-            PreferredLyricsProvider.PAXSENIX -> listOf(
-                PaxsenixLyricsProvider,
-                BetterLyricsProvider,
-                LrcLibLyricsProvider,
-                KuGouLyricsProvider,
-                LyricsPlusProvider,
-                YouTubeSubtitleLyricsProvider,
-                YouTubeLyricsProvider,
-            )
-            PreferredLyricsProvider.LYRICSPLUS -> listOf(
-                LyricsPlusProvider,
-                BetterLyricsProvider,
-                PaxsenixLyricsProvider,
-                LrcLibLyricsProvider,
-                KuGouLyricsProvider,
-                YouTubeSubtitleLyricsProvider,
-                YouTubeLyricsProvider,
-            )
-        }
+
+        return LyricsProviderRegistry.getDefaultProviderOrder()
+            .mapNotNull { LyricsProviderRegistry.getProviderByName(it) }
     }
 
     companion object {

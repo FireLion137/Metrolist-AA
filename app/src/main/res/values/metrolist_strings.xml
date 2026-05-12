@@ -4,6 +4,7 @@
     <string name="remote_history">Remote</string>
 
     <string name="charts">Charts</string>
+    <string name="mixes">Mixes</string>
     <string name="back_button_desc">Back</string>
     <string name="album_cover_desc">Album cover</string>
     <string name="top_music_videos">Top music videos</string>
@@ -149,6 +150,8 @@
     <string name="enable_song_cache">Enable song cache</string>
     <string name="enable_song_cache_desc">Automatically cache songs for faster future playback</string>
     <string name="show_uploaded_playlist">Show Uploaded playlist</string>
+    <string name="show_most_stats_playlists">Show Weekly and Monthly Most playlists</string>
+    <string name="show_most_stats_playlists_desc">Create and show stats-based Most playlists in Stats and Library</string>
     <string name="shuffle_playlist_first">Shuffle playlist or album first</string>
     <string name="shuffle_playlist_first_desc">When shuffling, play all songs from the current playlist or album before moving to similar content</string>
     <string name="prevent_duplicate_tracks_in_queue">Prevent duplicate tracks in queue</string>
@@ -820,6 +823,8 @@
     <string name="speed_dial">Speed dial</string>
     <string name="pin_to_speed_dial">Pin to speed dial</string>
     <string name="unpin_from_speed_dial">Unpin from speed dial</string>
+    <string name="pin">Pin</string>
+    <string name="unpin">Unpin</string>
     <string name="randomize_home_order">Randomize home screen order</string>
     <string name="randomize_home_order_desc">Randomly reorder home screen sections using weighted priorities</string>
 
@@ -946,4 +951,11 @@
     <string name="switch_to_list_view">Switch to list view</string>
     <string name="switch_to_grid_view">Switch to grid view</string>
     <string name="more_options">More options</string>
+
+    <!-- Loudness Level -->
+    <string name="loudness_level">Loudness level</string>
+    <string name="loudness_level_aggressive">Aggressive (-7 dB)</string>
+    <string name="loudness_level_loud">Loud (-11 dB)</string>
+    <string name="loudness_level_balanced">Balanced (-14 dB)</string>
+    <string name="loudness_level_quiet">Quiet (-19 dB)</string>
 </resources>
