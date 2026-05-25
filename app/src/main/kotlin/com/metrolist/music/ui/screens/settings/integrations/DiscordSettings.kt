@@ -97,11 +97,11 @@ import com.metrolist.music.ui.component.Material3SettingsGroup
 import com.metrolist.music.ui.component.Material3SettingsItem
 import com.metrolist.music.ui.component.TextFieldDialog
 import com.metrolist.music.ui.utils.backToMain
+import com.metrolist.music.discordrpc.DiscordRpcConnection
+import com.metrolist.music.discordrpc.SuperProperties
 import com.metrolist.music.utils.DiscordRPC
-import com.metrolist.music.utils.SuperProperties
 import com.metrolist.music.utils.makeTimeString
 import com.metrolist.music.utils.rememberPreference
-import com.my.kizzy.rpc.KizzyRPC
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -181,7 +181,7 @@ fun DiscordSettings(
             return@LaunchedEffect
         }
         launch(Dispatchers.IO) {
-            KizzyRPC
+            DiscordRpcConnection
                 .getUserInfo(
                     token,
                     SuperProperties.userAgent,
@@ -221,7 +221,7 @@ fun DiscordSettings(
                 isVerifying = true
                 error = null
                 coroutineScope.launch(Dispatchers.IO) {
-                    KizzyRPC
+                    DiscordRpcConnection
                         .getUserInfo(
                             token,
                             SuperProperties.userAgent,
@@ -807,6 +807,7 @@ fun DiscordSettings(
         RichPresence(
             song = song,
             currentPlaybackTimeMillis = position,
+            useDetails = useDetails,
             activityType = activityType,
             activityName = activityName,
             button1Text = button1Text,
@@ -840,6 +841,7 @@ fun DiscordSettings(
 fun RichPresence(
     song: Song?,
     currentPlaybackTimeMillis: Long = 0L,
+    useDetails: Boolean = false,
     activityType: String = "listening",
     activityName: String = "",
     button1Text: String = "",
@@ -849,13 +851,23 @@ fun RichPresence(
 ) {
     val context = LocalContext.current
 
-    val activityLabel =
-        when (activityType) {
-            "playing" -> stringResource(R.string.discord_playing_metrolist)
-            "watching" -> stringResource(R.string.discord_watching_metrolist)
-            "competing" -> stringResource(R.string.discord_competing_metrolist)
-            else -> stringResource(R.string.listening_to_metrolist)
-        }
+    val activityLabel = if (activityName.isNotEmpty()) {
+        activityName
+    } else if (song != null) {
+        if (useDetails) song.song.title else song.artists.joinToString { it.name }
+    } else {
+        context.getString(R.string.app_name).removeSuffix(" Debug")
+    }
+    val activityPrefix = remember(activityType) {
+        val full =
+            when (activityType) {
+                "playing" -> context.getString(R.string.discord_playing_metrolist)
+                "watching" -> context.getString(R.string.discord_watching_metrolist)
+                "competing" -> context.getString(R.string.discord_competing_metrolist)
+                else -> context.getString(R.string.listening_to_metrolist)
+            }
+        full.removeSuffix("Metrolist").trimEnd()
+    }
 
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainer,
@@ -868,7 +880,11 @@ fun RichPresence(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
-                text = if (activityName.isNotEmpty()) activityName else activityLabel,
+                text = if (activityName.isNotEmpty() && song != null) {
+                    DiscordRPC.resolveVariables(activityName, song)
+                } else {
+                    "$activityPrefix $activityLabel"
+                },
                 style = MaterialTheme.typography.labelLarge,
                 textAlign = TextAlign.Start,
                 fontWeight = FontWeight.ExtraBold,

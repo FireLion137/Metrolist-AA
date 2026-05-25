@@ -244,7 +244,7 @@ fun AutoPlaylistScreen(
                         val takeFlags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
                         context.contentResolver.takePersistableUriPermission(uri, takeFlags)
                     } catch (e: SecurityException) {
-                        android.util.Log.w("AutoPlaylistScreen", "Could not take persistable permission: ${e.message}")
+                        Timber.w(e, "Could not take persistable permission")
                     }
                 }
                 uploadJob =
@@ -912,7 +912,7 @@ private fun AutoPlaylistHeader(
         // Playlist Name
         Text(
             text = name,
-            style = MaterialTheme.typography.headlineSmall,
+            style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
             maxLines = 2,

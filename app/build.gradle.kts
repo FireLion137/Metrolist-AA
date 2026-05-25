@@ -88,14 +88,14 @@ abstract class GenerateProtoTask : DefaultTask() {
 
 android {
     namespace = "com.metrolist.music"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = applicationIdOverride ?: baseApplicationId
         minSdk = 26
         targetSdk = 36
-        versionCode = 146
-        versionName = "13.4.2"
+        versionCode = 147
+        versionName = "13.4.3"
         resValue("string", "app_name", appNameOverride ?: "Metrolist")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -379,7 +379,7 @@ dependencies {
     implementation(project(":innertube"))
     implementation(project(":kugou"))
     implementation(project(":lrclib"))
-    implementation(project(":kizzy"))
+    implementation(project(":discordrpc"))
     implementation(project(":lastfm"))
     implementation(project(":betterlyrics"))
     implementation(project(":shazamkit"))

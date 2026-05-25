@@ -33,22 +33,18 @@ class CoilBitmapLoader(
 
     private fun createFallbackBitmap(): Bitmap = createBitmap(64, 64)
 
-    private fun Bitmap.copyIfNeeded(): Bitmap =
-        if (isRecycled) {
-            createFallbackBitmap()
-        } else {
-            try {
-                copy(Bitmap.Config.ARGB_8888, false) ?: createFallbackBitmap()
-            } catch (e: Exception) {
-                createFallbackBitmap()
-            }
-        }
+    private fun Bitmap.createIndependentCopy(): Bitmap {
+        if (isRecycled) return createFallbackBitmap()
+        val copy = copy(Bitmap.Config.ARGB_8888, false)
+        if (copy != null) return copy
+        return createFallbackBitmap()
+    }
 
     override fun decodeBitmap(data: ByteArray): ListenableFuture<Bitmap> =
         scope.future(Dispatchers.IO) {
             try {
                 val bitmap = BitmapFactory.decodeByteArray(data, 0, data.size)
-                bitmap?.copyIfNeeded() ?: createFallbackBitmap()
+                bitmap?.createIndependentCopy() ?: createFallbackBitmap()
             } catch (e: Exception) {
                 Timber.tag("CoilBitmapLoader").w(e, "Failed to decode bitmap data")
                 createFallbackBitmap()
@@ -73,7 +69,7 @@ class CoilBitmapLoader(
                     is SuccessResult -> {
                         try {
                             val bitmap = result.image.toBitmap()
-                            bitmap.copyIfNeeded()
+                            bitmap.createIndependentCopy()
                         } catch (e: Exception) {
                             Timber.tag("CoilBitmapLoader").w(e, "Failed to convert image to bitmap")
                             createFallbackBitmap()
