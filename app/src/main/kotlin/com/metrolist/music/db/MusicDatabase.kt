@@ -118,7 +118,7 @@ class MusicDatabase(
         SortedSongAlbumMap::class,
         PlaylistSongMapPreview::class,
     ],
-    version = 37,
+    version = 38,
     exportSchema = true,
     autoMigrations = [
         AutoMigration(from = 2, to = 3),
@@ -156,6 +156,7 @@ class MusicDatabase(
         AutoMigration(from = 34, to = 35),
         AutoMigration(from = 35, to = 36, spec = Migration35To36::class),
         AutoMigration(from = 36, to = 37),
+        AutoMigration(from = 37, to = 38),
     ],
 )
 @TypeConverters(Converters::class)
@@ -206,6 +207,24 @@ abstract class InternalDatabase : RoomDatabase() {
                             },
                         ).build(),
             )
+
+        fun newInternalDatabaseInstance(context: Context, dbName: String = DB_NAME): InternalDatabase =
+            Room
+                .databaseBuilder(context, InternalDatabase::class.java, dbName)
+                .openHelperFactory(BackupBeforeMigrationFactory(context, dbName))
+                .addMigrations(
+                    MIGRATION_1_2,
+                    MIGRATION_21_24,
+                    MIGRATION_22_24,
+                    MIGRATION_24_25,
+                ).setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
+                .setTransactionExecutor(
+                    java.util.concurrent.Executors
+                        .newFixedThreadPool(4),
+                ).setQueryExecutor(
+                    java.util.concurrent.Executors
+                        .newFixedThreadPool(4),
+                ).build()
     }
 }
 
