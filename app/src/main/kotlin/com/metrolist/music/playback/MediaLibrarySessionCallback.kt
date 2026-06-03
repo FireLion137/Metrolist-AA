@@ -468,26 +468,6 @@ constructor(
                             }
                         }
 
-                        if (rawLyrics == null || rawLyrics == LyricsEntity.LYRICS_NOT_FOUND) {
-                            return@future LibraryResult.ofItemList(
-                                listOf(
-                                    MediaItem.Builder()
-                                        .setMediaId("${MusicService.LYRICS}/lyrics_not_found")
-                                        .setMediaMetadata(
-                                            MediaMetadata.Builder()
-                                                .setTitle(context.getString(R.string.lyrics_not_found))
-                                                .setSubtitle(null)
-                                                .setIsPlayable(false)
-                                                .setIsBrowsable(false)
-                                                .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
-                                                .setArtworkUri(drawableUri(R.drawable.lyrics))
-                                                .build()
-                                        )
-                                        .build()
-                                ), params
-                            )
-                        }
-
                         val items = mutableListOf<MediaItem>()
 
                         if (songTitle != null) {
@@ -510,79 +490,86 @@ constructor(
 
                         val allLangs = listOf("Japanese", "Korean", "Chinese", "Hindi", "Ukrainian", "Russian", "Serbian", "Bulgarian", "Belarusian", "Kyrgyz", "Macedonian")
 
-                        if (rawLyrics.startsWith("[")) {
-                            // Synchronized Text
-                            val parsedLines = LyricsUtils.parseLyrics(rawLyrics)
-                            val lyricsOffset = database.song(currentMediaId).firstOrNull()?.song?.lyricsOffset?.toLong() ?: 0L
+                        if (rawLyrics != null && rawLyrics != LyricsEntity.LYRICS_NOT_FOUND) {
+                            if (rawLyrics.startsWith("[")) {
+                                // Synchronized Text
+                                val parsedLines = LyricsUtils.parseLyrics(rawLyrics)
+                                val lyricsOffset = database.song(currentMediaId)
+                                    .firstOrNull()?.song?.lyricsOffset?.toLong() ?: 0L
 
-                            val currentIndex = LyricsUtils.findCurrentLineIndex(parsedLines, currentPosition + lyricsOffset)
-
-                            // 3 rows (-1, current, +1)
-                            val start = (currentIndex - 1).coerceAtLeast(0)
-                            val end = (currentIndex + 1).coerceAtMost(parsedLines.size - 1)
-
-                            for (i in start..end) {
-                                val entry = parsedLines[i]
-                                val isCurrent = i == currentIndex
-
-                                val titleText = if (isCurrent) "▶ ${entry.text}" else entry.text
-                                val displayTitle = titleText.takeIf { entry.text.isNotBlank() } ?: (if (isCurrent) "▶ 🎶" else "🎶")
-
-                                val romanizedText = LyricsUtils.romanize(
-                                    text = rawLyrics,
-                                    line = entry.text,
-                                    enabledLanguages = allLangs,
-                                    romanizeCyrillicByLine = true
+                                val currentIndex = LyricsUtils.findCurrentLineIndex(
+                                    parsedLines,
+                                    currentPosition + lyricsOffset
                                 )
-                                val subtitleText = romanizedText?.takeIf { it.isNotBlank() }
 
-                                items.add(
-                                    MediaItem.Builder()
-                                        .setMediaId("${MusicService.LYRICS}/lyrics_line_$i")
-                                        .setMediaMetadata(
-                                            MediaMetadata.Builder()
-                                                .setTitle(displayTitle)
-                                                .setSubtitle(subtitleText)
-                                                .setIsPlayable(false)
-                                                .setIsBrowsable(false)
-                                                .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
-                                                .setArtworkUri(drawableUri(R.drawable.lyrics))
-                                                .build()
-                                        )
-                                        .build()
-                                )
-                            }
-                        } else {
-                            // NOT Synchronized Text
-                            val lines = rawLyrics.lines().filter { it.isNotBlank() }
-                            lines.forEachIndexed { index, line ->
-                                val romanizedText = LyricsUtils.romanize(
-                                    text = rawLyrics,
-                                    line = line,
-                                    enabledLanguages = allLangs,
-                                    romanizeCyrillicByLine = true
-                                )
-                                val subtitleText = romanizedText?.takeIf { it.isNotBlank() }
+                                // 3 rows (-1, current, +1)
+                                val start = (currentIndex - 1).coerceAtLeast(0)
+                                val end = (currentIndex + 1).coerceAtMost(parsedLines.size - 1)
 
-                                items.add(
-                                    MediaItem.Builder()
-                                        .setMediaId("${MusicService.LYRICS}/lyrics_line_$index")
-                                        .setMediaMetadata(
-                                            MediaMetadata.Builder()
-                                                .setTitle(line)
-                                                .setSubtitle(subtitleText)
-                                                .setIsPlayable(false)
-                                                .setIsBrowsable(false)
-                                                .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
-                                                .setArtworkUri(drawableUri(R.drawable.lyrics))
-                                                .build()
-                                        )
-                                        .build()
-                                )
+                                for (i in start..end) {
+                                    val entry = parsedLines[i]
+                                    val isCurrent = i == currentIndex
+
+                                    val titleText = if (isCurrent) "▶ ${entry.text}" else entry.text
+                                    val displayTitle = titleText.takeIf { entry.text.isNotBlank() }
+                                        ?: (if (isCurrent) "▶ 🎶" else "🎶")
+
+                                    val romanizedText = LyricsUtils.romanize(
+                                        text = rawLyrics,
+                                        line = entry.text,
+                                        enabledLanguages = allLangs,
+                                        romanizeCyrillicByLine = true
+                                    )
+                                    val subtitleText = romanizedText?.takeIf { it.isNotBlank() }
+
+                                    items.add(
+                                        MediaItem.Builder()
+                                            .setMediaId("${MusicService.LYRICS}/lyrics_line_$i")
+                                            .setMediaMetadata(
+                                                MediaMetadata.Builder()
+                                                    .setTitle(displayTitle)
+                                                    .setSubtitle(subtitleText)
+                                                    .setIsPlayable(false)
+                                                    .setIsBrowsable(false)
+                                                    .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
+                                                    .setArtworkUri(drawableUri(R.drawable.lyrics))
+                                                    .build()
+                                            )
+                                            .build()
+                                    )
+                                }
+                            } else {
+                                // NOT Synchronized Text
+                                val lines = rawLyrics.lines().filter { it.isNotBlank() }
+                                lines.forEachIndexed { index, line ->
+                                    val romanizedText = LyricsUtils.romanize(
+                                        text = rawLyrics,
+                                        line = line,
+                                        enabledLanguages = allLangs,
+                                        romanizeCyrillicByLine = true
+                                    )
+                                    val subtitleText = romanizedText?.takeIf { it.isNotBlank() }
+
+                                    items.add(
+                                        MediaItem.Builder()
+                                            .setMediaId("${MusicService.LYRICS}/lyrics_line_$index")
+                                            .setMediaMetadata(
+                                                MediaMetadata.Builder()
+                                                    .setTitle(line)
+                                                    .setSubtitle(subtitleText)
+                                                    .setIsPlayable(false)
+                                                    .setIsBrowsable(false)
+                                                    .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
+                                                    .setArtworkUri(drawableUri(R.drawable.lyrics))
+                                                    .build()
+                                            )
+                                            .build()
+                                    )
+                                }
                             }
                         }
 
-                        if (items.isEmpty()) {
+                        if (items.isEmpty() || (items.size == 1 && items.first().mediaId == "${MusicService.LYRICS}/title_header")) {
                             items.add(
                                 MediaItem.Builder()
                                     .setMediaId("${MusicService.LYRICS}/lyrics_not_found")
