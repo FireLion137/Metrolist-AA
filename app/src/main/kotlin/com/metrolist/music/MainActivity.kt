@@ -7,6 +7,7 @@ package com.metrolist.music
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.ForegroundServiceStartNotAllowedException
 import android.app.PendingIntent
 import android.content.ComponentName
 import android.content.Intent
@@ -189,9 +190,9 @@ import com.metrolist.music.ui.theme.MetrolistTheme
 import com.metrolist.music.ui.theme.extractThemeColor
 import com.metrolist.music.ui.utils.appBarScrollBehavior
 import com.metrolist.music.ui.utils.resetHeightOffset
+import com.metrolist.music.utils.SearchRoutes
 import com.metrolist.music.utils.SyncUtils
 import com.metrolist.music.utils.Updater
-import com.metrolist.music.discord.DiscordSdkHelper
 import com.metrolist.music.utils.dataStore
 import com.metrolist.music.utils.get
 import com.metrolist.music.utils.rememberEnumPreference
@@ -211,8 +212,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import timber.log.Timber
-import java.net.URLDecoder
-import java.net.URLEncoder
 import java.util.Locale
 import javax.inject.Inject
 
@@ -323,10 +322,16 @@ class MainActivity : ComponentActivity() {
         // when the framework expects a fresh foreground promotion for that start request.
         if (!MusicService.isRunning) {
             val serviceIntent = Intent(this, MusicService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                ContextCompat.startForegroundService(this, serviceIntent)
-            } else {
-                startService(serviceIntent)
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    ContextCompat.startForegroundService(this, serviceIntent)
+                } else {
+                    startService(serviceIntent)
+                }
+            } catch (e: ForegroundServiceStartNotAllowedException) {
+                Timber.w(e, "Cannot start foreground service from background")
+            } catch (e: IllegalStateException) {
+                Timber.w(e, "Failed to start foreground service")
             }
         }
 
@@ -353,10 +358,6 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         if (isFinishing) {
             listenTogetherManager.disconnect()
-            try {
-                DiscordSdkHelper.setEngineActivity(null)
-            } catch (_: Exception) {
-            }
         }
         super.onDestroy()
         // Use effective playing state so Cast (local player paused, remote playing) is included.
@@ -397,8 +398,6 @@ class MainActivity : ComponentActivity() {
 
         // Initialize Listen Together manager
         listenTogetherManager.initialize()
-        // Initialize Discord Social SDK engine activity
-        DiscordSdkHelper.setEngineActivity(this)
 
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
             val locale =
@@ -749,7 +748,7 @@ class MainActivity : ComponentActivity() {
                     remember {
                         { searchQuery ->
                             if (searchQuery.isNotEmpty()) {
-                                navController.navigate("search/${URLEncoder.encode(searchQuery, "UTF-8")}")
+                                navController.navigate(SearchRoutes.resultRoute(searchQuery))
 
                                 if (dataStore[PauseSearchHistoryKey] != true) {
                                     lifecycleScope.launch(Dispatchers.IO) {
@@ -849,14 +848,9 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(navBackStackEntry) {
                     if (inSearchScreen) {
                         val searchQuery =
-                            withContext(Dispatchers.IO) {
-                                val rawQuery = navBackStackEntry?.arguments?.getString("query")!!
-                                try {
-                                    URLDecoder.decode(rawQuery, "UTF-8")
-                                } catch (e: IllegalArgumentException) {
-                                    rawQuery
-                                }
-                            }
+                            SearchRoutes.decodeQuery(
+                                navBackStackEntry?.arguments?.getString("query").orEmpty(),
+                            )
                         onQueryChange(
                             TextFieldValue(
                                 searchQuery,
@@ -1110,7 +1104,7 @@ class MainActivity : ComponentActivity() {
                                             val targetEntry =
                                                 try {
                                                     val route = navController.currentBackStackEntry?.destination?.route
-                                                    if (route == "search/{query}" || route == "search_input") {
+                                                    if (route == SearchRoutes.ROUTE || route == "search_input") {
                                                         // For search screens, use search_input entry
                                                         navController.getBackStackEntry("search_input")
                                                     } else {
@@ -1517,7 +1511,7 @@ class MainActivity : ComponentActivity() {
 
             "search" -> {
                 uri.getQueryParameter("q")?.let {
-                    navController.navigate("search/${URLEncoder.encode(it, "UTF-8")}")
+                    navController.navigate(SearchRoutes.resultRoute(it))
                 }
             }
 

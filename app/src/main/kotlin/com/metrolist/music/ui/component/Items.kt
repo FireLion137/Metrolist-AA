@@ -39,9 +39,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.ui.text.LinkAnnotation
-import androidx.compose.ui.text.TextLinkStyles
-import androidx.compose.ui.text.withLink
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -70,12 +67,15 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
@@ -137,29 +137,84 @@ import kotlin.jvm.JvmName
 
 const val ActiveBoxAlpha = 0.6f
 
+@Composable
+fun currentGridThumbnailHeight(): Dp {
+    val gridItemSize by rememberEnumPreference(GridItemsSizeKey, GridItemSize.BIG)
+    return if (gridItemSize == GridItemSize.BIG) GridThumbnailHeight else SmallGridThumbnailHeight
+}
+
 @JvmName("ClickableArtistTextEntities")
 @Composable
 fun ClickableArtistText(
     artists: List<ArtistEntity>,
     modifier: Modifier = Modifier,
     style: TextStyle = MaterialTheme.typography.bodySmall,
+    color: Color = LocalContentColor.current,
     maxLines: Int = 1,
     overflow: TextOverflow = TextOverflow.Ellipsis,
 ) {
     val navController = LocalNavController.current
     val andString = stringResource(R.string.and)
-    val linkColor = LocalContentColor.current
-    val annotatedString = remember(artists, andString) {
+    val annotatedString = remember(artists, andString, color) {
         buildAnnotatedString {
             artists.forEachIndexed { index, artist ->
                 withLink(
                     LinkAnnotation.Clickable(
                         tag = artist.id,
-                        styles = TextLinkStyles(SpanStyle(color = linkColor)),
+                        styles = TextLinkStyles(SpanStyle(color = color)),
                     ) {
                         navController.navigate("artist/${artist.id}")
                     }
                 ) {
+                    append(artist.name)
+                }
+                if (index != artists.lastIndex) {
+                    if (index == artists.lastIndex - 1) {
+                        append(" $andString ")
+                    } else {
+                        append(", ")
+                    }
+                }
+            }
+        }
+    }
+    Text(
+        text = annotatedString,
+        style = style,
+        maxLines = maxLines,
+        overflow = overflow,
+        modifier = modifier,
+    )
+}
+
+@JvmName("ClickableArtistTextInnerTube")
+@Composable
+fun ClickableArtistText(
+    artists: List<com.metrolist.innertube.models.Artist>,
+    modifier: Modifier = Modifier,
+    style: TextStyle = MaterialTheme.typography.bodySmall,
+    maxLines: Int = 1,
+    overflow: TextOverflow = TextOverflow.Ellipsis,
+    color: Color = LocalContentColor.current
+) {
+    val navController = LocalNavController.current
+    val andString = stringResource(R.string.and)
+    val annotatedString = remember(artists, andString, color) {
+        buildAnnotatedString {
+            artists.forEachIndexed { index, artist ->
+                val artistId = artist.id
+                if (artistId != null) {
+                    withLink(
+                        LinkAnnotation.Clickable(
+                            tag = artistId,
+                            styles = TextLinkStyles(SpanStyle(color = color)),
+                        ) {
+                            navController.navigate("artist/$artistId")
+                        }
+                    ) {
+                        append(artist.name)
+                    }
+                } else {
                     append(artist.name)
                 }
                 if (index != artists.lastIndex) {
@@ -187,22 +242,23 @@ fun ClickableArtistText(
     artists: List<MediaMetadata.Artist>,
     modifier: Modifier = Modifier,
     style: TextStyle = MaterialTheme.typography.bodySmall,
+    color: Color = LocalContentColor.current,
     maxLines: Int = 1,
     overflow: TextOverflow = TextOverflow.Ellipsis,
 ) {
     val navController = LocalNavController.current
     val andString = stringResource(R.string.and)
-    val linkColor = LocalContentColor.current
-    val annotatedString = remember(artists, andString) {
+    val annotatedString = remember(artists, andString, color) {
         buildAnnotatedString {
             artists.forEachIndexed { index, artist ->
-                if (artist.id != null) {
+                val artistId = artist.id
+                if (artistId != null) {
                     withLink(
                         LinkAnnotation.Clickable(
-                            tag = artist.id!!,
-                            styles = TextLinkStyles(SpanStyle(color = linkColor)),
+                            tag = artistId,
+                            styles = TextLinkStyles(SpanStyle(color = color)),
                         ) {
-                            navController.navigate("artist/${artist.id}")
+                            navController.navigate("artist/$artistId")
                         }
                     ) {
                         append(artist.name)
@@ -227,12 +283,6 @@ fun ClickableArtistText(
         overflow = overflow,
         modifier = modifier,
     )
-}
-
-@Composable
-fun currentGridThumbnailHeight(): Dp {
-    val gridItemSize by rememberEnumPreference(GridItemsSizeKey, GridItemSize.BIG)
-    return if (gridItemSize == GridItemSize.BIG) GridThumbnailHeight else SmallGridThumbnailHeight
 }
 
 // Basic list item - optimized with inline to reduce recomposition
@@ -508,18 +558,23 @@ fun SongListItem(
                  badges()
                  if (subtitleOverride == null) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        ClickableArtistText(
-                            artists = song.orderedArtists,
-                            style = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.secondary),
-                            modifier = Modifier.weight(1f)
-                        )
                         Text(
-                            text = " | ${makeTimeString(song.song.duration * 1000L)}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.secondary,
+                            text = song.orderedArtists.joinToArtistString(" ${stringResource(R.string.and)} ") { it.name },
+                            style = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.secondary),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
                         )
+                        val durationText = makeTimeString(song.song.duration * 1000L)
+                        if (durationText.isNotEmpty()) {
+                            Text(
+                                text = " • $durationText",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.secondary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                     }
                  } else {
                      Text(
@@ -599,20 +654,23 @@ fun SongGridItem(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.fillMaxWidth()
         ) {
-            ClickableArtistText(
-                artists = song.orderedArtists,
+            Text(
+                text = song.orderedArtists.joinToArtistString(" ${stringResource(R.string.and)} ") { it.name },
                 style = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.secondary),
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f)
             )
-            Text(
-                text = " | ${makeTimeString(song.song.duration * 1000L)}",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.secondary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            val durationText = makeTimeString(song.song.duration * 1000L)
+            if (durationText.isNotEmpty()) {
+                Text(
+                    text = durationText,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.secondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     },
     badges = badges,
@@ -754,13 +812,15 @@ fun AlbumListItem(
     subtitle = {
         badges()
         Row(verticalAlignment = Alignment.CenterVertically) {
-            ClickableArtistText(
-                artists = album.artists,
+            Text(
+                text = album.artists.joinToArtistString(" ${stringResource(R.string.and)} ") { it.name },
                 style = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.secondary),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f)
             )
             Text(
-                text = " | ${pluralStringResource(R.plurals.n_song, album.album.songCount, album.album.songCount)}${album.album.year?.let { " | $it" } ?: ""}",
+                text = " • ${pluralStringResource(R.plurals.n_song, album.album.songCount, album.album.songCount)}${album.album.year?.let { " • $it" } ?: ""}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.secondary,
                 maxLines = 1,
@@ -1074,23 +1134,26 @@ fun MediaMetadataListItem(
         subtitle = {
             if (mediaMetadata.explicit) Icon.Explicit()
             Row(verticalAlignment = Alignment.CenterVertically) {
-                ClickableArtistText(
-                    artists = mediaMetadata.artists,
+                Text(
+                    text = mediaMetadata.artists.joinToArtistString(" ${stringResource(R.string.and)} ") { it.name },
                     style = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.secondary),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )
-                Text(
-                    text = " | ${makeTimeString(mediaMetadata.duration * 1000L)}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.secondary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                val durationText = makeTimeString(mediaMetadata.duration * 1000L)
+                if (durationText.isNotEmpty()) {
+                    Text(
+                        text = " • $durationText",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.secondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
                 if (mediaMetadata.suggestedBy != null) {
                     Text(
-                        text = " | ",
+                        text = " • ",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.secondary,
                         maxLines = 1,
