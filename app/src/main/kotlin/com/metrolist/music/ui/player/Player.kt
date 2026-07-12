@@ -183,6 +183,7 @@ import com.metrolist.music.utils.dataStore
 import com.metrolist.music.utils.makeTimeString
 import com.metrolist.music.utils.rememberEnumPreference
 import com.metrolist.music.utils.rememberPreference
+import com.metrolist.music.utils.safeDataStoreEdit
 import dagger.hilt.android.EntryPointAccessors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -194,8 +195,6 @@ import kotlin.math.max
 import kotlin.math.roundToInt
 import com.metrolist.music.ui.component.Icon as MIcon
 import com.metrolist.music.constants.SleepTimerDefaultKey
-import com.metrolist.music.utils.dataStore
-import androidx.datastore.preferences.core.edit
 import com.metrolist.music.constants.SleepTimerFadeOutKey
 import com.metrolist.music.constants.SleepTimerStopAfterCurrentSongKey
 
@@ -589,10 +588,10 @@ fun BottomSheetPlayer(
 
     val sleepTimerEnabled =
         remember(
-            playerConnection.service.sleepTimer.triggerTime,
-            playerConnection.service.sleepTimer.pauseWhenSongEnd,
+            playerConnection.service.sleepTimer?.triggerTime,
+            playerConnection.service.sleepTimer?.pauseWhenSongEnd,
         ) {
-            playerConnection.service.sleepTimer.isActive
+            playerConnection.service.sleepTimer?.isActive ?: false
         }
 
     var sleepTimerTimeLeft by remember {
@@ -603,10 +602,10 @@ fun BottomSheetPlayer(
         if (sleepTimerEnabled) {
             while (isActive) {
                 sleepTimerTimeLeft =
-                    if (playerConnection.service.sleepTimer.pauseWhenSongEnd) {
+                    if (playerConnection.service.sleepTimer?.pauseWhenSongEnd == true) {
                         playerConnection.player.duration - playerConnection.player.currentPosition
                     } else {
-                        playerConnection.service.sleepTimer.triggerTime - System.currentTimeMillis()
+                        (playerConnection.service.sleepTimer?.triggerTime ?: 0L) - System.currentTimeMillis()
                     }
                 delay(1000L)
             }
@@ -644,7 +643,7 @@ fun BottomSheetPlayer(
                 TextButton(
                     onClick = {
                         showSleepTimerDialog = false
-                        playerConnection.service.sleepTimer.start(
+                        playerConnection.service.sleepTimer?.start(
                             minute = sleepTimerValue.roundToInt(),
                             stopAfterCurrentSong = sleepTimerStopAfterCurrentSong,
                             fadeOut = sleepTimerFadeOut,
@@ -688,7 +687,7 @@ fun BottomSheetPlayer(
                             FilledIconButton(
                                 onClick = {
                                     scope.launch {
-                                        context.dataStore.edit { settings ->
+                                        context.safeDataStoreEdit { settings ->
                                             settings[SleepTimerDefaultKey] = sleepTimerValue
                                         }
                                     }
@@ -709,7 +708,7 @@ fun BottomSheetPlayer(
                             OutlinedIconButton(
                                 onClick = {
                                     scope.launch {
-                                        context.dataStore.edit { settings ->
+                                        context.safeDataStoreEdit { settings ->
                                             settings[SleepTimerDefaultKey] = sleepTimerValue
                                         }
                                     }
@@ -727,7 +726,7 @@ fun BottomSheetPlayer(
                         OutlinedIconButton(
                             onClick = {
                                 showSleepTimerDialog = false
-                                playerConnection.service.sleepTimer.start(minute = -1)
+                                playerConnection.service.sleepTimer?.start(minute = -1)
                             },
                         ) {
                             Text(stringResource(R.string.end_of_song))
@@ -971,8 +970,7 @@ fun BottomSheetPlayer(
                                         contentDescription = null,
                                         modifier =
                                             Modifier
-                                                .size(32.dp),
-                                        tint = textButtonColor.copy(alpha = 0.7f),
+                                                .size(32.dp)
                                     )
                                 }
                             } else {

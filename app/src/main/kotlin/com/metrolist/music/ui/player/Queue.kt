@@ -125,6 +125,7 @@ import com.metrolist.music.ui.utils.ShowMediaInfo
 import com.metrolist.music.utils.dataStore
 import com.metrolist.music.utils.makeTimeString
 import com.metrolist.music.utils.rememberPreference
+import com.metrolist.music.utils.safeDataStoreEdit
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -133,8 +134,6 @@ import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 import kotlin.math.roundToInt
 import com.metrolist.music.constants.SleepTimerDefaultKey
-import com.metrolist.music.utils.dataStore
-import androidx.datastore.preferences.core.edit
 import android.widget.Toast
 import androidx.compose.runtime.derivedStateOf
 import com.metrolist.music.constants.SleepTimerFadeOutKey
@@ -235,10 +234,10 @@ fun Queue(
     val sleepTimerStopAfterCurrentSong by rememberPreference(SleepTimerStopAfterCurrentSongKey, false)
     val sleepTimerFadeOut by rememberPreference(SleepTimerFadeOutKey, false)
     val sleepTimerEnabled = remember(
-        playerConnection.service.sleepTimer.triggerTime,
-        playerConnection.service.sleepTimer.pauseWhenSongEnd
+        playerConnection.service.sleepTimer?.triggerTime,
+        playerConnection.service.sleepTimer?.pauseWhenSongEnd
     ) {
-        playerConnection.service.sleepTimer.isActive
+        playerConnection.service.sleepTimer?.isActive ?: false
     }
     var sleepTimerTimeLeft by remember { mutableLongStateOf(0L) }
 
@@ -246,10 +245,10 @@ fun Queue(
         if (sleepTimerEnabled) {
             while (isActive) {
                 sleepTimerTimeLeft =
-                    if (playerConnection.service.sleepTimer.pauseWhenSongEnd) {
+                    if (playerConnection.service.sleepTimer?.pauseWhenSongEnd == true) {
                         playerConnection.player.duration - playerConnection.player.currentPosition
                     } else {
-                        playerConnection.service.sleepTimer.triggerTime - System.currentTimeMillis()
+                        (playerConnection.service.sleepTimer?.triggerTime ?: 0L) - System.currentTimeMillis()
                     }
                 delay(1000L)
             }
@@ -313,7 +312,7 @@ fun Queue(
                         icon = R.drawable.bedtime,
                         onClick = {
                             if (sleepTimerEnabled) {
-                                playerConnection.service.sleepTimer.clear()
+                                playerConnection.service.sleepTimer?.clear()
                             } else {
                                 showSleepTimerDialog = true
                             }
@@ -461,7 +460,7 @@ fun Queue(
                         onClick = {
                             if (!isListenTogetherGuest) {
                                 if (sleepTimerEnabled) {
-                                    playerConnection.service.sleepTimer.clear()
+                                    playerConnection.service.sleepTimer?.clear()
                                 } else {
                                     showSleepTimerDialog = true
                                 }
@@ -557,7 +556,7 @@ fun Queue(
                     onDismiss = { showSleepTimerDialog = false },
                     onConfirm = {
                         showSleepTimerDialog = false
-                        playerConnection.service.sleepTimer.start(
+                        playerConnection.service.sleepTimer?.start(
                             minute = sleepTimerValue.roundToInt(),
                             stopAfterCurrentSong = sleepTimerStopAfterCurrentSong,
                             fadeOut = sleepTimerFadeOut,
@@ -601,7 +600,7 @@ fun Queue(
                                     Button(
                                         onClick = {
                                             coroutineScope.launch {
-                                                context.dataStore.edit { settings ->
+                                                context.safeDataStoreEdit { settings ->
                                                     settings[SleepTimerDefaultKey] = sleepTimerValue
                                                 }
                                             }
@@ -622,7 +621,7 @@ fun Queue(
                                     OutlinedButton(
                                         onClick = {
                                             coroutineScope.launch {
-                                                context.dataStore.edit { settings ->
+                                                context.safeDataStoreEdit { settings ->
                                                     settings[SleepTimerDefaultKey] = sleepTimerValue
                                                 }
                                             }
@@ -640,7 +639,7 @@ fun Queue(
                                 OutlinedButton(
                                     onClick = {
                                         showSleepTimerDialog = false
-                                        playerConnection.service.sleepTimer.start(
+                                        playerConnection.service.sleepTimer?.start(
                                             minute = -1,
                                         )
                                     },

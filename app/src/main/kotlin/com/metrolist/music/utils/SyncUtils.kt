@@ -7,7 +7,6 @@
 package com.metrolist.music.utils
 
 import android.content.Context
-import androidx.datastore.preferences.core.edit
 import com.metrolist.innertube.YouTube
 import com.metrolist.innertube.models.AlbumItem
 import com.metrolist.innertube.models.ArtistItem
@@ -121,6 +120,7 @@ class SyncUtils @Inject constructor(
     val syncState: StateFlow<SyncState> = _syncState.asStateFlow()
 
     private var lastfmSendLikes = false
+    @Volatile private var cachedLastSyncEpoch: Long = 0L
     private val playlistsBeingModified = ConcurrentHashMap<String, AtomicInteger>()
     // Tracks songs currently being added to YouTube — browseId → set of songIds
     private val pendingYouTubeAdds = ConcurrentHashMap<String, MutableSet<String>>()
@@ -151,6 +151,11 @@ class SyncUtils @Inject constructor(
             .collectLatest(syncScope) {
                 lastfmSendLikes = it
             }
+
+        syncScope.launch {
+            val loaded = context.dataStore.get(LastFullSyncKey, 0L)
+            cachedLastSyncEpoch = maxOf(cachedLastSyncEpoch, loaded)
+        }
 
         startProcessingQueue()
     }
@@ -260,15 +265,18 @@ class SyncUtils @Inject constructor(
             }
 
             val lastSync = context.dataStore.get(LastFullSyncKey, 0L)
+            val effectiveLastSync = maxOf(lastSync, cachedLastSyncEpoch)
             val currentTime = LocalDateTime.now().toEpochSecond(ZoneOffset.UTC)
-            if (lastSync > 0 && (currentTime - lastSync) < SYNC_COOLDOWN) {
+            if (effectiveLastSync > 0 && (currentTime - effectiveLastSync) < SYNC_COOLDOWN) {
                 return@launch
             }
 
             syncChannel.send(SyncOperation.FullSync)
 
-            context.dataStore.edit { settings ->
-                settings[LastFullSyncKey] = LocalDateTime.now().toEpochSecond(ZoneOffset.UTC)
+            val now = LocalDateTime.now().toEpochSecond(ZoneOffset.UTC)
+            cachedLastSyncEpoch = now
+            context.safeDataStoreEdit { settings ->
+                settings[LastFullSyncKey] = now
             }
         }
     }
@@ -412,7 +420,14 @@ class SyncUtils @Inject constructor(
     suspend fun clearAllLibraryData() = withContext(Dispatchers.IO) {
         Timber.d("[LOGOUT_CLEAR] Starting complete library data cleanup")
         try {
-            // Clear podcast data first
+            updateState {
+                copy(
+                    overallStatus = SyncStatus.Syncing,
+                    currentOperation = "Clearing all library data"
+                )
+            }
+
+            // Clear podcast data first (subscribed podcasts + saved episodes)
             Timber.d("[LOGOUT_CLEAR] Clearing podcast data")
             executeClearPodcastData()
 
@@ -421,49 +436,61 @@ class SyncUtils @Inject constructor(
             database.clearListenHistory()
             database.clearSearchHistory()
 
-            // Get all user tables from the database (auto-detect)
-            val allTables = getAllUserTables()
-            Timber.d("[LOGOUT_CLEAR] Found ${allTables.size} tables: $allTables")
+            // Clear all tables using Room's transaction layer to ensure proper
+            // InvalidationTracker notifications and avoid direct SQLite access
+            // that could bypass Room's connection management.
+            database.withTransaction {
+                // Get all user tables from the database (auto-detect)
+                val allTables = getAllUserTables()
+                Timber.d("[LOGOUT_CLEAR] Found ${allTables.size} tables: $allTables")
 
-            // Tables to skip (system tables and tables we handle specially)
-            val skipTables = setOf(
-                "android_metadata",
-                "room_master_table",
-                "sqlite_sequence",
-                "search_history",  // Already cleared above
-                "listen_history"   // Already cleared above
-            )
+                // Tables to skip (system tables and tables we handle specially)
+                val skipTables = setOf(
+                    "android_metadata",
+                    "room_master_table",
+                    "sqlite_sequence",
+                    "search_history",  // Already cleared above
+                    "listen_history"   // Already cleared above
+                )
 
-            // Tables with foreign key references - delete these first (mapping tables)
-            val mappingTables = listOf(
-                "playlist_song_map",
-                "song_album_map",
-                "song_artist_map",
-                "album_artist_map",
-                "related_song_map"
-            )
+                // Tables with foreign key references - delete these first (mapping tables)
+                val mappingTables = listOf(
+                    "playlist_song_map",
+                    "song_album_map",
+                    "song_artist_map",
+                    "album_artist_map",
+                    "related_song_map"
+                )
 
-            // Delete mapping tables first
-            Timber.d("[LOGOUT_CLEAR] Deleting mapping tables")
-            for (table in mappingTables) {
-                if (table in allTables) {
+                // Delete mapping tables first
+                Timber.d("[LOGOUT_CLEAR] Deleting mapping tables")
+                for (table in mappingTables) {
+                    if (table in allTables) {
+                        safeDeleteTable(table)
+                    }
+                }
+
+                // Delete all other tables except song (handled specially to keep downloads)
+                Timber.d("[LOGOUT_CLEAR] Deleting remaining tables")
+                for (table in allTables) {
+                    if (table in skipTables || table in mappingTables || table == "song") {
+                        continue
+                    }
                     safeDeleteTable(table)
                 }
-            }
 
-            // Delete all other tables except song (handled specially to keep downloads)
-            Timber.d("[LOGOUT_CLEAR] Deleting remaining tables")
-            for (table in allTables) {
-                if (table in skipTables || table in mappingTables || table == "song") {
-                    continue
+                // Finally, delete songs but keep downloaded ones
+                if ("song" in allTables) {
+                    Timber.d("[LOGOUT_CLEAR] Deleting songs (keeping downloaded)")
+                    safeRawQuery("DELETE FROM song WHERE dateDownload IS NULL")
                 }
-                safeDeleteTable(table)
             }
 
-            // Finally, delete songs but keep downloaded ones
-            if ("song" in allTables) {
-                Timber.d("[LOGOUT_CLEAR] Deleting songs (keeping downloaded)")
-                safeRawQuery("DELETE FROM song WHERE dateDownload IS NULL")
+            updateState {
+                copy(
+                    overallStatus = SyncStatus.Idle,
+                    currentOperation = ""
+                )
             }
 
             Timber.d("[LOGOUT_CLEAR] All library data cleared successfully")
@@ -1618,8 +1645,10 @@ class SyncUtils @Inject constructor(
             }
 
             // Reset sync timestamp
-            context.dataStore.edit { settings ->
-                settings[LastFullSyncKey] = LocalDateTime.now().toEpochSecond(ZoneOffset.UTC)
+            val now = LocalDateTime.now().toEpochSecond(ZoneOffset.UTC)
+            cachedLastSyncEpoch = now
+            context.safeDataStoreEdit { settings ->
+                settings[LastFullSyncKey] = now
             }
 
             updateState { copy(overallStatus = SyncStatus.Completed, currentOperation = "") }
@@ -1633,31 +1662,30 @@ class SyncUtils @Inject constructor(
     private suspend fun executeClearPodcastData() = withContext(Dispatchers.IO) {
         Timber.d("[PODCAST_CLEAR] Starting podcast data cleanup")
 
-        updateState { copy(overallStatus = SyncStatus.Syncing, currentOperation = "Clearing podcast data") }
-
         try {
+            // Read data FIRST, outside any transaction. Room Flows must be collected outside
+            // withTransaction to avoid deadlocks (Room's InvalidationTracker may block on
+            // the transaction executor when collecting a DAO Flow inside a transaction).
+            val subscribedPodcasts = database.subscribedPodcasts().first()
+            val allEpisodes = database.podcastEpisodesByCreateDateAsc().first()
+            val savedEpisodes = allEpisodes.filter { it.song.inLibrary != null }
+
+            Timber.d("[PODCAST_CLEAR] Clearing ${subscribedPodcasts.size} subscribed podcasts " +
+                    "and ${savedEpisodes.size} saved episodes")
+
+            // Now perform the writes in a transaction for atomicity
             database.withTransaction {
-                // Clear subscribed podcasts
-                val subscribedPodcasts = database.subscribedPodcasts().first()
-                Timber.d("[PODCAST_CLEAR] Clearing ${subscribedPodcasts.size} subscribed podcasts")
                 subscribedPodcasts.forEach { podcast ->
                     database.update(podcast.copy(bookmarkedAt = null))
                 }
-
-                // Clear episode library status (inLibrary) for episodes
-                val savedEpisodes = database.podcastEpisodesByCreateDateAsc().first()
-                    .filter { it.song.inLibrary != null }
-                Timber.d("[PODCAST_CLEAR] Clearing ${savedEpisodes.size} saved episodes")
                 savedEpisodes.forEach { song ->
                     database.update(song.song.copy(inLibrary = null))
                 }
             }
 
-            updateState { copy(overallStatus = SyncStatus.Completed, currentOperation = "") }
             Timber.d("[PODCAST_CLEAR] Podcast data cleared successfully")
         } catch (e: Exception) {
             Timber.e(e, "[PODCAST_CLEAR] Error during cleanup")
-            updateState { copy(overallStatus = SyncStatus.Error(e.message ?: "Unknown error"), currentOperation = "") }
         }
     }
 
