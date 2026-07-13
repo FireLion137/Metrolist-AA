@@ -701,6 +701,26 @@ constructor(
                 MusicService.SEARCH -> {
                     val songId = path.getOrNull(2) ?: return@future defaultResult
                     val searchQuery = path.getOrNull(1) ?: return@future defaultResult
+
+                    val isVoiceSearch = songId.isBlank() && searchQuery.isNotBlank()
+
+                    if (isVoiceSearch) {
+                        //Search if the voiceQuery is about a local playlist and play only the songs in that playlist
+                        val localPlaylists = database.searchPlaylists(searchQuery, 5).first()
+                        val exactLocalPlaylist = localPlaylists.firstOrNull {
+                            it.playlist.name.equals(searchQuery, ignoreCase = true)
+                        }
+                        if (exactLocalPlaylist != null) {
+                            val playlistSongs = database.playlistSongs(exactLocalPlaylist.playlist.id).first()
+                            if (playlistSongs.isNotEmpty()) {
+                                return@future MediaItemsWithStartPosition(
+                                    playlistSongs.map { it.song.toMediaItem() },
+                                    0,
+                                    startPositionMs
+                                )
+                            }
+                        }
+                    }
                     
                     val searchResults = mutableListOf<Song>()
 
@@ -762,6 +782,76 @@ constructor(
                     if (searchResults.isEmpty()) {
                         return@future defaultResult
                     }
+
+                    //Check if the voiceQuery is about a specific song and plays only that
+                    if (isVoiceSearch) {
+                        val firstSong = searchResults.first()
+                        val query = searchQuery.lowercase().trim()
+                        val title = firstSong.title.lowercase().trim()
+
+                        if (title == query) {
+                            return@future MediaItemsWithStartPosition(
+                                listOf(firstSong.toMediaItem()), 0, startPositionMs
+                            )
+                        }
+
+                        //Tries to remove artists from the query, in order to match if artists are used
+                        var cleanedQuery = query
+                        firstSong.artists.forEach { artist ->
+                            val normalizedArtist = artist.name.lowercase().trim()
+                            if (normalizedArtist.isNotBlank()) {
+                                cleanedQuery = cleanedQuery.replace(
+                                    Regex("\\b${Regex.escape(normalizedArtist)}\\b", RegexOption.IGNORE_CASE), "")
+                            }
+                        }
+                        cleanedQuery = cleanedQuery.replace(Regex("\\s+"), " ").trim()
+                        if (cleanedQuery.isNotBlank()) {
+                            if (title == cleanedQuery) {
+                                return@future MediaItemsWithStartPosition(
+                                    listOf(firstSong.toMediaItem()), 0, startPositionMs
+                                )
+                            }
+
+                            //token-boundary matching
+                            val punctuationRegex = Regex("[^\\p{L}\\p{N}\\s]")
+                            val pureTitle = title.replace(punctuationRegex, " ")
+                            val pureQuery = cleanedQuery.replace(punctuationRegex, " ")
+
+                            val queryTokens = pureQuery.split(" ").filter { it.isNotBlank() }.toSet()
+                            val titleTokens = pureTitle.split(" ").filter { it.isNotBlank() }.toSet()
+
+                            if (queryTokens.isNotEmpty() && titleTokens.isNotEmpty()) {
+                                val isTooGeneric = when {
+                                    queryTokens.size == 1 && queryTokens.first().length < 4 -> true
+                                    cleanedQuery.length < 5 -> true
+                                    else -> false
+                                }
+
+                                if (!isTooGeneric) {
+                                    //Count fuzzy matching in title and query
+                                    val fuzzyThreshold = 0.80
+                                    val matchedQueryCount = queryTokens.count { q ->
+                                        titleTokens.any { t -> q == t || tokenSimilarity(q, t) >= fuzzyThreshold }
+                                    }
+                                    val matchedTitleCount = titleTokens.count { t ->
+                                        queryTokens.any { q -> q == t || tokenSimilarity(q, t) >= fuzzyThreshold }
+                                    }
+
+                                    if (matchedQueryCount > 0 && matchedTitleCount > 0) {
+                                        val titleCoverage = matchedTitleCount.toDouble() / titleTokens.size
+                                        val queryCoverage = matchedQueryCount.toDouble() / queryTokens.size
+                                        val isStrongMatch = titleCoverage >= 0.60 && queryCoverage >= 0.60
+
+                                        if (isStrongMatch) {
+                                            return@future MediaItemsWithStartPosition(
+                                                listOf(firstSong.toMediaItem()), 0, startPositionMs
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     
                     val targetIndex = searchResults.indexOfFirst { it.id == songId }
                     
@@ -775,6 +865,26 @@ constructor(
                 else -> defaultResult
             }
         }
+
+    private fun tokenSimilarity(a: String, b: String): Double {
+        if (a == b) return 1.0
+        if (a.isEmpty() || b.isEmpty()) return 0.0
+        val maxLen = maxOf(a.length, b.length)
+        if (maxLen < 4) return 0.0
+
+        // Levenshte Distance
+        val dp = Array(a.length + 1) { IntArray(b.length + 1) }
+        for (i in 0..a.length) dp[i][0] = i
+        for (j in 0..b.length) dp[0][j] = j
+        for (i in 1..a.length) {
+            for (j in 1..b.length) {
+                val cost = if (a[i - 1] == b[j - 1]) 0 else 1
+                dp[i][j] = minOf(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost)
+            }
+        }
+        val distance = dp[a.length][b.length]
+        return 1.0 - (distance.toDouble() / maxLen)
+    }
 
     private fun drawableUri(
         @DrawableRes id: Int,
