@@ -706,7 +706,7 @@ constructor(
 
                     if (isVoiceSearch) {
                         //Search if the voiceQuery is about a local playlist and play only the songs in that playlist
-                        val localPlaylists = database.searchPlaylists(searchQuery, 5).first()
+                        val localPlaylists = database.searchPlaylists(searchQuery).first()
                         val exactLocalPlaylist = localPlaylists.firstOrNull {
                             it.playlist.name.equals(searchQuery, ignoreCase = true)
                         }
