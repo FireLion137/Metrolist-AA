@@ -796,15 +796,25 @@ constructor(
                         }
 
                         //Tries to remove artists from the query, in order to match if artists are used
-                        var cleanedQuery = query
+                        val punctuationRegex = Regex("[^\\p{L}\\p{N}\\s]")
+                        val pureQuery = query.replace(punctuationRegex, " ")
+                        val queryTokens = pureQuery.split(" ").filter { it.isNotBlank() }.toMutableSet()
+
                         firstSong.artists.forEach { artist ->
-                            val normalizedArtist = artist.name.lowercase().trim()
-                            if (normalizedArtist.isNotBlank()) {
-                                cleanedQuery = cleanedQuery.replace(
-                                    Regex("\\b${Regex.escape(normalizedArtist)}\\b", RegexOption.IGNORE_CASE), "")
+                            val pureArtist = artist.name.lowercase().replace(punctuationRegex, " ")
+                            val artistTokens = pureArtist.split(Regex("\\s+")).filter { it.isNotBlank() }
+
+                            queryTokens.removeIf { queryToken ->
+                                if (queryToken.length < 4) {
+                                    artistTokens.contains(queryToken)
+                                } else {
+                                    artistTokens.any { artistToken ->
+                                        tokenSimilarity(queryToken, artistToken) >= 0.85
+                                    }
+                                }
                             }
                         }
-                        cleanedQuery = cleanedQuery.replace(Regex("\\s+"), " ").trim()
+                        val cleanedQuery = queryTokens.joinToString(" ")
                         if (cleanedQuery.isNotBlank()) {
                             if (title == cleanedQuery) {
                                 return@future MediaItemsWithStartPosition(
@@ -812,12 +822,7 @@ constructor(
                                 )
                             }
 
-                            //token-boundary matching
-                            val punctuationRegex = Regex("[^\\p{L}\\p{N}\\s]")
                             val pureTitle = title.replace(punctuationRegex, " ")
-                            val pureQuery = cleanedQuery.replace(punctuationRegex, " ")
-
-                            val queryTokens = pureQuery.split(" ").filter { it.isNotBlank() }.toSet()
                             val titleTokens = pureTitle.split(" ").filter { it.isNotBlank() }.toSet()
 
                             if (queryTokens.isNotEmpty() && titleTokens.isNotEmpty()) {
@@ -829,7 +834,7 @@ constructor(
 
                                 if (!isTooGeneric) {
                                     //Count fuzzy matching in title and query
-                                    val fuzzyThreshold = 0.80
+                                    val fuzzyThreshold = 0.85
                                     val matchedQueryCount = queryTokens.count { q ->
                                         titleTokens.any { t -> q == t || tokenSimilarity(q, t) >= fuzzyThreshold }
                                     }
@@ -866,24 +871,51 @@ constructor(
             }
         }
 
-    private fun tokenSimilarity(a: String, b: String): Double {
-        if (a == b) return 1.0
-        if (a.isEmpty() || b.isEmpty()) return 0.0
-        val maxLen = maxOf(a.length, b.length)
-        if (maxLen < 4) return 0.0
+    /**
+     * Token Similarity based on Jaro-Winkler Distance Algorithm
+     */
+    private fun tokenSimilarity(s1: String, s2: String): Double {
+        if (s1 == s2) return 1.0
+        if (s1.isEmpty() || s2.isEmpty()) return 0.0
 
-        // Levenshte Distance
-        val dp = Array(a.length + 1) { IntArray(b.length + 1) }
-        for (i in 0..a.length) dp[i][0] = i
-        for (j in 0..b.length) dp[0][j] = j
-        for (i in 1..a.length) {
-            for (j in 1..b.length) {
-                val cost = if (a[i - 1] == b[j - 1]) 0 else 1
-                dp[i][j] = minOf(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost)
+        val maxDist = (maxOf(s1.length, s2.length) / 2) - 1
+        if (maxDist < 0) return 0.0
+
+        var matches = 0
+        val s1Matches = BooleanArray(s1.length)
+        val s2Matches = BooleanArray(s2.length)
+
+        for (i in s1.indices) {
+            val start = maxOf(0, i - maxDist)
+            val end = minOf(s2.length - 1, i + maxDist)
+
+            for (j in start..end) {
+                if (!s2Matches[j] && s1[i] == s2[j]) {
+                    s1Matches[i] = true
+                    s2Matches[j] = true
+                    matches++
+                    break
+                }
             }
         }
-        val distance = dp[a.length][b.length]
-        return 1.0 - (distance.toDouble() / maxLen)
+        if (matches == 0) return 0.0
+
+        var transpositions = 0
+        var k = 0
+        for (i in s1.indices) {
+            if (s1Matches[i]) {
+                while (!s2Matches[k]) k++
+                if (s1[i] != s2[k++]) transpositions++
+            }
+        }
+
+        val jaro = ((matches.toDouble() / s1.length) +
+                (matches.toDouble() / s2.length) +
+                ((matches - transpositions / 2.0) / matches)) / 3.0
+
+        val prefix = s1.commonPrefixWith(s2).length.coerceAtMost(4)
+        val p = 0.1
+        return jaro + (prefix * p * (1.0 - jaro))
     }
 
     private fun drawableUri(
