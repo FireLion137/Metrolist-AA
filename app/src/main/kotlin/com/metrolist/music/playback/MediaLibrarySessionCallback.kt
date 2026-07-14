@@ -915,7 +915,8 @@ constructor(
 
         val prefix = s1.commonPrefixWith(s2).length.coerceAtMost(4)
         val p = 0.1
-        return jaro + (prefix * p * (1.0 - jaro))
+        val boostThreshold = 0.7
+        return if (jaro > boostThreshold) jaro + (prefix * p * (1.0 - jaro)) else jaro
     }
 
     private fun drawableUri(
