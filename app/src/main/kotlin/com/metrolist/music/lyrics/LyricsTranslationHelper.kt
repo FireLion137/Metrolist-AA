@@ -100,6 +100,11 @@ object LyricsTranslationHelper {
         )
     }
 
+    suspend fun clearTranslationCache() {
+        translationCache.clear()
+        translationJob?.join()
+    }
+
     fun cancelTranslation() {
         translationJob?.cancel()
         if (_status.value is TranslationStatus.Translating) {

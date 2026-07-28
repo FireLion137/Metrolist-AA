@@ -59,8 +59,12 @@ import com.metrolist.music.ui.component.IconButton
 import com.metrolist.music.ui.component.Material3SettingsGroup
 import com.metrolist.music.ui.component.Material3SettingsItem
 import android.text.format.Formatter
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.metrolist.music.db.entities.LyricsEntity
 import com.metrolist.music.ui.utils.backToMain
 import com.metrolist.music.utils.rememberPreference
+import com.metrolist.music.viewmodels.LyricsManagerViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -80,6 +84,16 @@ fun StorageSettings(
     val imageDiskCache = context.imageLoader.diskCache ?: return
     val playerCache = LocalPlayerConnection.current?.service?.playerCache ?: return
     val downloadCache = LocalPlayerConnection.current?.service?.downloadCache ?: return
+
+    val lyricsViewModel: LyricsManagerViewModel = hiltViewModel()
+    val allLyrics by remember { database.allLyrics() }
+        .collectAsStateWithLifecycle(initialValue = emptyList())
+    val downloadedLyricsCount = remember(allLyrics) {
+        allLyrics.count {
+            it.lyrics.isNotBlank() && it.lyrics != LyricsEntity.LYRICS_NOT_FOUND
+        }
+    }
+    var showClearLyricsDialog by remember { mutableStateOf(false) }
 
     val coroutineScope = rememberCoroutineScope()
     val songCacheString = stringResource(R.string.song_cache).lowercase()
@@ -473,6 +487,43 @@ fun StorageSettings(
                     ),
                 ),
         )
+
+        Material3SettingsGroup(
+            title = stringResource(R.string.lyrics_cache),
+            items = listOf(
+                Material3SettingsItem(
+                    icon = painterResource(R.drawable.lyrics),
+                    title = { Text(stringResource(R.string.manage_downloaded_lyrics)) },
+                    description = {
+                        Text(
+                            if (downloadedLyricsCount > 0)
+                                stringResource(R.string.lyrics_count, downloadedLyricsCount)
+                            else stringResource(R.string.manage_downloaded_lyrics_desc),
+                        )
+                    },
+                    onClick = { navController.navigate("settings/storage/lyrics") },
+                ),
+                Material3SettingsItem(
+                    icon = painterResource(R.drawable.clear_all),
+                    title = { Text(stringResource(R.string.clear_all_lyrics)) },
+                    enabled = downloadedLyricsCount > 0,
+                    onClick = { showClearLyricsDialog = true },
+                ),
+            ),
+        )
+
+        if (showClearLyricsDialog) {
+            ActionPromptDialog(
+                title = stringResource(R.string.clear_all_lyrics),
+                onDismiss = { showClearLyricsDialog = false },
+                onConfirm = {
+                    showClearLyricsDialog = false
+                    lyricsViewModel.clearAll()
+                },
+                onCancel = { showClearLyricsDialog = false },
+                content = { Text(text = stringResource(R.string.clear_lyrics_dialog)) },
+            )
+        }
     }
 
     TopAppBar(
