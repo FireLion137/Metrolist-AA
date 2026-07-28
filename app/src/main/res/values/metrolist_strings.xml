@@ -163,6 +163,16 @@
     <string name="skip_silence_instant">Instantly skip silence</string>
     <string name="skip_silence_instant_desc">Jump ahead during silent moments instead of speeding up playback</string>
 
+    <string name="lyrics_cache">Lyrics cache</string>
+    <string name="manage_downloaded_lyrics">Manage downloaded lyrics</string>
+    <string name="manage_downloaded_lyrics_desc">View and delete lyrics stored for each song</string>
+    <string name="clear_all_lyrics">Clear all downloaded lyrics</string>
+    <string name="clear_lyrics_dialog">All downloaded lyrics will be deleted. They will be fetched again automatically when needed.</string>
+    <string name="lyrics_count">%1$d songs with lyrics</string>
+    <string name="no_downloaded_lyrics">No downloaded lyrics</string>
+    <string name="delete_lyrics_confirm">Delete lyrics for %1$d selected songs?</string>
+    <string name="not_played_yet">Song not played yet</string>
+
     <string name="advanced_login">Log in with token</string>
     <string name="token_hidden">Tap to show token</string>
     <string name="token_shown">Tap again to copy or edit</string>

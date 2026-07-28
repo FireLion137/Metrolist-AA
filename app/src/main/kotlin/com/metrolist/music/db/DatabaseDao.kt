@@ -756,6 +756,18 @@ interface DatabaseDao {
     fun lyrics(id: String?): Flow<LyricsEntity?>
 
     @Transaction
+    @Query("SELECT * FROM lyrics")
+    fun allLyrics(): Flow<List<LyricsEntity>>
+
+    @Transaction
+    @Query("DELETE FROM lyrics WHERE id IN (:ids)")
+    fun deleteLyricsByIds(ids: List<String>)
+
+    @Transaction
+    @Query("DELETE FROM lyrics")
+    fun deleteAllLyrics()
+
+    @Transaction
     @SuppressWarnings(RoomWarnings.QUERY_MISMATCH)
     @Query("SELECT *, (SELECT COUNT(1) FROM song_artist_map JOIN song ON song_artist_map.songId = song.id WHERE artistId = artist.id AND song.inLibrary IS NOT NULL) AS songCount FROM artist WHERE songCount > 0 ORDER BY rowId")
     fun artistsByCreateDateAsc(): Flow<List<Artist>>

@@ -204,6 +204,12 @@ constructor(
             .mapNotNull { LyricsProviderRegistry.getProviderByName(it) }
     }
 
+    suspend fun clearCache() {
+        currentLyricsJob?.cancel()
+        currentLyricsJob?.join()
+        cache.evictAll()
+    }
+
     companion object {
         private const val MAX_CACHE_SIZE = 3
     }
