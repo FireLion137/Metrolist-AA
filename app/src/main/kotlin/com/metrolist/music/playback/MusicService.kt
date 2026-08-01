@@ -65,6 +65,7 @@ import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.PlayerMessage
 import androidx.media3.exoplayer.Renderer
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.analytics.PlaybackStats
@@ -304,7 +305,7 @@ class MusicService :
     private var crossfadeEnabled = false
     private var crossfadeDuration = 5000f
     private var crossfadeGapless = true
-    private var crossfadeTriggerJob: Job? = null
+    private var crossfadeMessage: PlayerMessage? = null
 
     private val secondaryPlayerListener =
         object : Player.Listener {
@@ -1206,6 +1207,7 @@ class MusicService :
                                 playQueue(
                                     queue = restoredQueue,
                                     playWhenReady = false,
+                                    restoringQueue = true,
                                 )
                             }
                         }
@@ -1761,6 +1763,7 @@ class MusicService :
     fun playQueue(
         queue: Queue,
         playWhenReady: Boolean = true,
+        restoringQueue: Boolean = false,
     ) {
         if (!playerInitialized.value) {
             Timber.tag(TAG).w("playQueue called before player initialization, queuing request")
@@ -1774,8 +1777,7 @@ class MusicService :
         currentQueue = queue
         queueTitle = null
         val persistShuffleAcrossQueues = dataStore.get(PersistentShuffleAcrossQueuesKey, false)
-        val previousShuffleEnabled = player.shuffleModeEnabled
-        if (!persistShuffleAcrossQueues) {
+        if (!persistShuffleAcrossQueues && !restoringQueue) {
             player.shuffleModeEnabled = false
         }
         originalQueueSize = 0
@@ -2985,10 +2987,8 @@ class MusicService :
             }
         }
 
-        // For IO_UNSPECIFIED and IO_BAD_HTTP_STATUS, try recovery first
-        if (error.errorCode == PlaybackException.ERROR_CODE_IO_UNSPECIFIED ||
-            error.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS
-        ) {
+        // For IO_BAD_HTTP_STATUS, try recovery first
+        if (error.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS) {
             Timber.tag(TAG).d("IO error detected (${error.errorCode}), attempting recovery")
             handleGenericIOError(mediaId)
             return
@@ -4150,11 +4150,6 @@ class MusicService :
             return
         }
         super.onTaskRemoved(rootIntent)
-        // User removed the task while paused: drop foreground promotion so the process can idle.
-        // Queue/state remain persisted; opening the app restores playback as usual.
-        if (::player.isInitialized && !player.isPlaying) {
-            ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_DETACH)
-        }
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo) = mediaSession
@@ -4589,26 +4584,31 @@ class MusicService :
     }
 
     private fun scheduleCrossfade() {
-        crossfadeTriggerJob?.cancel()
-        crossfadeTriggerJob = null
-        if (!crossfadeEnabled || crossfadeDuration <= 0f || player.duration == C.TIME_UNSET || player.duration <= crossfadeDuration) return
+        crossfadeMessage?.cancel()
+        crossfadeMessage = null
+        
+        val mediaCrossfadeDuration = crossfadeDuration.toLong()
+
+        if (!crossfadeEnabled || crossfadeDuration <= 0f || player.duration == C.TIME_UNSET || player.duration <= mediaCrossfadeDuration) return
         if (crossfadeGapless && isNextItemGapless()) return
         if (!player.hasNextMediaItem() && player.repeatMode != REPEAT_MODE_ONE) return
 
-        val triggerTime = player.duration - crossfadeDuration.toLong()
-        val delayMs = triggerTime - player.currentPosition
-        if (delayMs <= 0) return
+        val triggerTime = player.duration - mediaCrossfadeDuration
+        val mediaTimeRemaining = triggerTime - player.currentPosition
+        if (mediaTimeRemaining <= 0) return
 
         val targetMediaId = player.currentMediaItem?.mediaId
 
-        crossfadeTriggerJob =
-            scope.launch {
-                delay(delayMs)
-                val timer = sleepTimer
-                if (isActive && player.isPlaying && player.currentMediaItem?.mediaId == targetMediaId && (timer == null || !timer.pauseWhenSongEnd)) {
-                    startCrossfade()
-                }
+        crossfadeMessage = player.createMessage { _, _ ->
+            val timer = sleepTimer
+            if (player.isPlaying && player.currentMediaItem?.mediaId == targetMediaId && (timer == null || !timer.pauseWhenSongEnd)) {
+                startCrossfade()
             }
+        }.apply {
+            setLooper(Looper.getMainLooper())
+            setPosition(triggerTime)
+            send()
+        }
     }
 
     private fun isNextItemGapless(): Boolean {
@@ -4622,7 +4622,7 @@ class MusicService :
     private fun startCrossfade() {
         if (isCrossfading) return
 
-        playerNormalizationProcessors.values.forEach { it.enabled = false }
+
 
         // Preserve player state before creating the secondary player
         // Use runBlocking to ensure we get the correct state from DataStore
@@ -4652,8 +4652,11 @@ class MusicService :
         secPlayer.seekTo(targetIndex, 0)
         secPlayer.volume = 0f
 
+        secPlayer.setPlaybackParameters(player.playbackParameters)
+
         secPlayer.repeatMode = savedRepeatMode
         secPlayer.shuffleModeEnabled = savedShuffleEnabled
+        secPlayer.playbackParameters = player.playbackParameters
 
         try {
             secPlayer.prepare()
@@ -4683,6 +4686,14 @@ class MusicService :
         player = nextPlayer
         _playerFlow.value = player
         secondaryPlayer = null
+
+        fadingPlayer?.repeatMode = Player.REPEAT_MODE_OFF
+        fadingPlayer?.let {
+            val currentIndex = it.currentMediaItemIndex
+            if (currentIndex < it.mediaItemCount - 1) {
+                it.removeMediaItems(currentIndex + 1, it.mediaItemCount)
+            }
+        }
 
         fadingPlayer?.removeListener(this)
         sleepTimer?.let { timer -> fadingPlayer?.removeListener(timer) }
@@ -4727,7 +4738,8 @@ class MusicService :
 
         crossfadeJob =
             scope.launch {
-                val duration = crossfadeDuration.toLong()
+                val speed = fadingPlayer?.playbackParameters?.speed?.coerceAtLeast(0.01f) ?: 1f
+                val duration = (crossfadeDuration / speed).toLong()
                 val steps = 20
                 val stepTime = duration / steps
                 val startVolume =
