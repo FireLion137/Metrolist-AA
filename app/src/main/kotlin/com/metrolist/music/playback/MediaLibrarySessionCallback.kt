@@ -1201,6 +1201,7 @@ internal fun isBrowsableMediaId(mediaId: String): Boolean =
         mediaId == MusicService.ALBUM ||
         mediaId == MusicService.PLAYLIST ||
         mediaId == MusicService.YOUTUBE_PLAYLIST ||
+        mediaId == MusicService.LYRICS ||
         mediaId.startsWith("${MusicService.ARTIST}/") ||
         mediaId.startsWith("${MusicService.ALBUM}/") ||
         mediaId.startsWith("${MusicService.PLAYLIST}/") ||
