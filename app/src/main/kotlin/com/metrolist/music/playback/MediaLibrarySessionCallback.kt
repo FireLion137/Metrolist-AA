@@ -64,6 +64,7 @@ import javax.inject.Inject
 import com.metrolist.music.constants.AndroidAutoSectionsOrderKey
 import com.metrolist.music.constants.AndroidAutoYouTubePlaylistsKey
 import com.metrolist.music.constants.AutoRadioQueueKey
+import com.metrolist.music.playback.aa.ArtworkUriResolver
 import com.metrolist.music.playback.queues.ListQueue
 import com.metrolist.music.playback.queues.YouTubeQueue
 import com.metrolist.music.ui.screens.settings.AndroidAutoSection
@@ -77,6 +78,7 @@ constructor(
     @ApplicationContext val context: Context,
     val database: MusicDatabase,
     val downloadUtil: DownloadUtil,
+    val artworkUriResolver: ArtworkUriResolver,
 ) : MediaLibrarySession.Callback {
     private val scope = CoroutineScope(Dispatchers.Main) + Job()
     lateinit var service: MusicService
@@ -904,6 +906,11 @@ constructor(
                 .build(),
         ).build()
 
+    private fun safeArtworkUri(
+        url: String?,
+        @DrawableRes placeholder: Int = R.drawable.music_note,
+    ): Uri = artworkUriResolver.resolve(url, placeholder)
+
     private fun Song.toMediaItem(path: String, isPlayable: Boolean = true, isBrowsable: Boolean = false): MediaItem {
         return MediaItem
             .Builder()
@@ -918,7 +925,7 @@ constructor(
                      .setArtist(artists.joinToArtistString(getArtistSeparator(context)) {
                          ArtistNameAliases.resolve(it.id, it.name)
                      })
-                     .setArtworkUri(song.thumbnailUrl?.toUri())
+                     .setArtworkUri(safeArtworkUri(song.thumbnailUrl))
                     .setIsPlayable(isPlayable)
                     .setIsBrowsable(isBrowsable)
                     .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
