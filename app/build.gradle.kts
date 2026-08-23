@@ -111,7 +111,7 @@ android {
         versionName = "13.6.3"
         val baseVersionName = requireNotNull(versionName)
         buildConfigField("String", "BASE_VERSION_NAME", "\"$baseVersionName\"")
-        buildCommit?.let { versionName = "$baseVersionName+$it" }
+        versionName = buildCommit?.let { "$baseVersionName+$it" } ?: baseVersionName
         resValue("string", "app_name", appNameOverride ?: "Metrolist")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
