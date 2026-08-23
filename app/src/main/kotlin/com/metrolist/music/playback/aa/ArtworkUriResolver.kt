@@ -54,7 +54,8 @@ class ArtworkUriResolver @Inject constructor(
                 ?: return false
 
             try {
-                true
+                val file = snapshot.data.toFile()
+                file.exists() && file.length() > 0L
             } finally {
                 snapshot.close()
             }
