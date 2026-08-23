@@ -26,6 +26,7 @@ class ArtworkUriResolver @Inject constructor(
     private companion object {
         const val MAX_CONCURRENT_DOWNLOADS = 10
         const val MAX_PENDING_PREFETCHES = 100
+        const val PREFETCH_DECODE_SIZE = 100
     }
 
     private val prefetchedUrls = ConcurrentHashMap.newKeySet<String>()
@@ -49,19 +50,26 @@ class ArtworkUriResolver @Inject constructor(
     }
 
     private fun isInCoilDiskCache(url: String): Boolean {
-        return try {
-            val snapshot = context.imageLoader.diskCache?.openSnapshot(url)
-                ?: return false
+        val diskCache = context.imageLoader.diskCache ?: return false
 
-            try {
-                val file = snapshot.data.toFile()
-                file.exists() && file.length() > 0L
-            } finally {
-                snapshot.close()
-            }
+        val snapshot = try {
+            diskCache.openSnapshot(url)
+        } catch (_: Throwable) {
+            null
+        } ?: return false
+
+        val isValid = try {
+            val file = snapshot.data.toFile()
+            file.exists() && file.length() > 0L
         } catch (_: Throwable) {
             false
         }
+        snapshot.close()
+
+        if (!isValid) {
+            runCatching { diskCache.remove(url) }
+        }
+        return isValid
     }
 
     private fun schedulePrefetch(url: String) {
@@ -75,8 +83,9 @@ class ArtworkUriResolver @Inject constructor(
                 semaphore.withPermit {
                     val request = ImageRequest.Builder(context)
                         .data(url)
+                        .size(PREFETCH_DECODE_SIZE)
                         .memoryCachePolicy(CachePolicy.DISABLED)
-                        .diskCachePolicy(CachePolicy.ENABLED)
+                        .diskCachePolicy(CachePolicy.WRITE_ONLY)
                         .build()
 
                     context.imageLoader.execute(request)
