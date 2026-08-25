@@ -243,6 +243,8 @@ class ArtworkUriResolver @Inject constructor(
                     val result = context.imageLoader.execute(request)
                     if (result is ErrorResult) {
                         addFailedUrl(url)
+                    }  else {
+                        failedUrls.remove(url)
                     }
                 }
             } catch (e: CancellationException) {
