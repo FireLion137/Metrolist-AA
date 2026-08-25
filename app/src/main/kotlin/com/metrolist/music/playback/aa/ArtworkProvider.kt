@@ -93,7 +93,8 @@ class ArtworkProvider : ContentProvider() {
             }
 
             val expected = uri.getQueryParameter("v")
-            if (expected != null && expected != "${file.length()}:${file.lastModified()}") {
+                ?: throw FileNotFoundException("Missing validation token")
+            if (expected != "${file.length()}:${file.lastModified()}") {
                 throw FileNotFoundException("Artwork replaced after validation")
             }
 
@@ -108,7 +109,7 @@ class ArtworkProvider : ContentProvider() {
             .d("openFile called: uri=$uri, mode=$mode, callingUid=${Binder.getCallingUid()}")
 
         enforceAllowedCaller()
-        if (!mode.startsWith("r")) {
+        if (mode != "r") {
             throw FileNotFoundException("Only read mode is supported")
         }
 
@@ -122,7 +123,7 @@ class ArtworkProvider : ContentProvider() {
             .d("openAssetFile called: uri=$uri, mode=$mode, callingUid=${Binder.getCallingUid()}")
 
         enforceAllowedCaller()
-        if (!mode.startsWith("r")) {
+        if (mode != "r") {
             throw FileNotFoundException("Only read mode is supported")
         }
 

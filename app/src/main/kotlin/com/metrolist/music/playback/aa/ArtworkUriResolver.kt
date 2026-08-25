@@ -13,6 +13,7 @@ import coil3.request.ErrorResult
 import coil3.request.ImageRequest
 import com.metrolist.music.R
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -244,7 +245,10 @@ class ArtworkUriResolver @Inject constructor(
                         addFailedUrl(url)
                     }
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: Throwable) {
+                addFailedUrl(url)
             } finally {
                 prefetchedUrls.remove(url)
             }
