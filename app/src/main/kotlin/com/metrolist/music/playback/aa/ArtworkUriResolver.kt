@@ -85,20 +85,14 @@ class ArtworkUriResolver @Inject constructor(
         } ?: return null
 
         val file = snapshot.data.toFile()
-        val seenIdentity = "${file.length()}:${file.lastModified()}"
         val identity = try {
-            if (file.exists() && file.length() > 0L && isValidImageFile(file)) seenIdentity else null
+            if (file.exists() && file.length() > 0L && isValidImageFile(file)) {
+                "${file.length()}:${file.lastModified()}"
+            } else null
         } catch (_: Throwable) {
             null
         }
         snapshot.close()
-
-        if (identity == null) {
-            // In case a concurrent prefetch with the same url completes successfully
-            if ("${file.length()}:${file.lastModified()}" == seenIdentity) {
-                runCatching { diskCache.remove(url) }
-            }
-        }
         return identity
     }
 
