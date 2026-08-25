@@ -2,6 +2,7 @@ package com.metrolist.music.playback.aa
 
 import android.content.ContentResolver
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.annotation.DrawableRes
@@ -18,6 +19,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import timber.log.Timber
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
@@ -32,13 +34,20 @@ class ArtworkUriResolver @Inject constructor(
         const val MAX_PENDING_PREFETCHES = 100
         const val PREFETCH_DECODE_SIZE = 100
         const val MAX_FAILED_URLS = 500
-        const val FAILED_RETRY_DELAY_MS = 10 * 60 * 1000L
+        const val FAILED_RETRY_DELAY_MS = 5 * 60 * 1000L
+
+        const val MAX_ARTWORK_DIMENSION = 4096
+        const val VALIDATION_DECODE_SIZE = 32
+        const val MIN_ARTWORK_FILE_SIZE = 100L
     }
 
     private val prefetchedUrls = ConcurrentHashMap.newKeySet<String>()
     private val failedUrls = ConcurrentHashMap<String, Long>()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val semaphore = Semaphore(MAX_CONCURRENT_DOWNLOADS)
+
+    private data class ValidatedFileIdentity(val size: Long, val lastModified: Long)
+    private val validatedFiles = ConcurrentHashMap<String, ValidatedFileIdentity>()
 
     fun resolve(
         url: String?,
@@ -79,15 +88,125 @@ class ArtworkUriResolver @Inject constructor(
         return isValid
     }
 
-    private fun isValidImageFile(file: File): Boolean {
+    internal fun isValidImageFile(file: File): Boolean {
+        if (!file.exists()) return false
+        val fileSize = file.length()
+        if (fileSize < MIN_ARTWORK_FILE_SIZE) return false
+
+        val identity = ValidatedFileIdentity(fileSize, file.lastModified())
+        if (validatedFiles[file.absolutePath] == identity) return true
+
+        if (!hasKnownImageSignature(file)) return false
+
+        // Stage 1: bounds check
+        val boundsOptions = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        try {
+            BitmapFactory.decodeFile(file.absolutePath, boundsOptions)
+        } catch (_: Throwable) {
+            return false
+        }
+
+        val width = boundsOptions.outWidth
+        val height = boundsOptions.outHeight
+
+        if (width <= 0 || height <= 0) return false
+        if (width > MAX_ARTWORK_DIMENSION || height > MAX_ARTWORK_DIMENSION) return false
+
+        //Check JPEG truncation
+        if (isJpeg(file) && !containsJpegEoi(file)) return false
+
+        // Stage 2: sampled decode
+        val sampleSize = calculateInSampleSize(width, height)
+        val decodeOptions = BitmapFactory.Options().apply {
+            inSampleSize = sampleSize
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+        }
+        val bitmap = try {
+            BitmapFactory.decodeFile(file.absolutePath, decodeOptions)
+        } catch (_: Throwable) {
+            null
+        }
+
+        val isValid = bitmap != null && bitmap.width > 0 && bitmap.height > 0
+        bitmap?.recycle()
+
+        if (isValid) {
+            validatedFiles[file.absolutePath] = identity
+        } else {
+            Timber.tag("ArtworkUriResolver")
+                .d("Artwork file $file is invalid")
+            validatedFiles.remove(file.absolutePath)
+        }
+
+        return isValid
+    }
+
+    private fun calculateInSampleSize(width: Int, height: Int): Int {
+        var sampleSize = 1
+        while (width / (sampleSize * 2) >= VALIDATION_DECODE_SIZE
+                && height / (sampleSize * 2) >= VALIDATION_DECODE_SIZE) {
+            sampleSize *= 2
+        }
+        return sampleSize
+    }
+
+    private fun hasKnownImageSignature(file: File): Boolean {
         return try {
-            val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeFile(file.absolutePath, options)
-            options.outWidth > 0 && options.outHeight > 0
+            file.inputStream().use { input ->
+                val header = ByteArray(12)
+                val read = input.read(header)
+                when {
+                    // JPEG: FF D8 FF
+                    read >= 3 &&
+                            header[0] == 0xFF.toByte() &&
+                            header[1] == 0xD8.toByte() &&
+                            header[2] == 0xFF.toByte() -> true
+                    // PNG: 89 50 4E 47
+                    read >= 4 &&
+                            header[0] == 0x89.toByte() &&
+                            header[1] == 0x50.toByte() &&
+                            header[2] == 0x4E.toByte() &&
+                            header[3] == 0x47.toByte() -> true
+                    // WebP: RIFF....WEBP
+                    read >= 12 &&
+                            header[0] == 0x52.toByte() && header[1] == 0x49.toByte() &&
+                            header[2] == 0x46.toByte() && header[3] == 0x46.toByte() &&
+                            header[8] == 0x57.toByte() && header[9] == 0x45.toByte() &&
+                            header[10] == 0x42.toByte() && header[11] == 0x50.toByte() -> true
+                    // GIF: GIF8
+                    read >= 4 &&
+                            header[0] == 0x47.toByte() && header[1] == 0x49.toByte() &&
+                            header[2] == 0x46.toByte() && header[3] == 0x38.toByte() -> true
+                    else -> false
+                }
+            }
         } catch (_: Throwable) {
             false
         }
     }
+
+    private fun isJpeg(file: File): Boolean =
+        try {
+            file.inputStream().use { it.read() == 0xFF && it.read() == 0xD8 }
+        } catch (_: Throwable) {
+            false
+        }
+
+    private fun containsJpegEoi(file: File): Boolean =
+        try {
+            file.inputStream().buffered().use { input ->
+                var prev = input.read()
+                while (prev != -1) {
+                    val curr = input.read()
+                    if (curr == -1) return false
+                    if (prev == 0xFF && curr == 0xD9) return true
+                    prev = curr
+                }
+                false
+            }
+        } catch (_: Throwable) {
+            false
+        }
 
     private fun schedulePrefetch(url: String) {
         if (context.imageLoader.diskCache == null) return
