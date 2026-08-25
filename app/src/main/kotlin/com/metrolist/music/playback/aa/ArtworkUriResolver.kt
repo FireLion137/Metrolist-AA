@@ -84,20 +84,20 @@ class ArtworkUriResolver @Inject constructor(
             null
         } ?: return null
 
+        val file = snapshot.data.toFile()
+        val seenIdentity = "${file.length()}:${file.lastModified()}"
         val identity = try {
-            val file = snapshot.data.toFile()
-            if (file.exists() && file.length() > 0L && isValidImageFile(file)) {
-                "${file.length()}:${file.lastModified()}"
-            } else {
-                null
-            }
+            if (file.exists() && file.length() > 0L && isValidImageFile(file)) seenIdentity else null
         } catch (_: Throwable) {
             null
         }
         snapshot.close()
 
         if (identity == null) {
-            runCatching { diskCache.remove(url) }
+            // In case a concurrent prefetch with the same url completes successfully
+            if ("${file.length()}:${file.lastModified()}" == seenIdentity) {
+                runCatching { diskCache.remove(url) }
+            }
         }
         return identity
     }
@@ -241,11 +241,7 @@ class ArtworkUriResolver @Inject constructor(
                         .build()
 
                     val result = context.imageLoader.execute(request)
-                    if (result is ErrorResult) {
-                        addFailedUrl(url)
-                    }  else {
-                        failedUrls.remove(url)
-                    }
+                    onPrefetchCompleted(url, result is ErrorResult)
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -257,7 +253,15 @@ class ArtworkUriResolver @Inject constructor(
         }
     }
 
-    private fun isFailedRecently(url: String): Boolean {
+    internal fun onPrefetchCompleted(url: String, isError: Boolean) {
+        if (isError || validatedIdentity(url) == null) {
+            addFailedUrl(url)
+        } else {
+            failedUrls.remove(url)
+        }
+    }
+
+    internal fun isFailedRecently(url: String): Boolean {
         val failedAt = failedUrls[url] ?: return false
         val now = SystemClock.DEFAULT.elapsedRealtime()
 

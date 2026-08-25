@@ -207,4 +207,17 @@ class ArtworkUriResolverValidationTest {
         val lo = bytes[markerIndex + 3].toInt() and 0xFF
         return (hi shl 8) or lo
     }
+
+    @Test
+    fun prefetchSuccessWithoutValidSnapshot_retainsBackoff() {
+        // Simulates the outcome of a successful prefetch on the network side
+        // but with no disk cache entries to serve.
+        val url = "https://random.url.com/artwork-missing"
+        resolver.onPrefetchCompleted(url, isError = false)
+
+        Assert.assertTrue(
+            "Backoff must remain if there is no serviceable snapshot",
+            resolver.isFailedRecently(url),
+        )
+    }
 }
