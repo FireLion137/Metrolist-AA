@@ -21,6 +21,7 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import timber.log.Timber
 import java.io.File
+import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -39,6 +40,7 @@ class ArtworkUriResolver @Inject constructor(
         const val MAX_ARTWORK_DIMENSION = 4096
         const val VALIDATION_DECODE_SIZE = 32
         const val MIN_ARTWORK_FILE_SIZE = 100L
+        const val MAX_VALIDATED_FILES_SIZE = 2000
     }
 
     private val prefetchedUrls = ConcurrentHashMap.newKeySet<String>()
@@ -47,7 +49,14 @@ class ArtworkUriResolver @Inject constructor(
     private val semaphore = Semaphore(MAX_CONCURRENT_DOWNLOADS)
 
     private data class ValidatedFileIdentity(val size: Long, val lastModified: Long)
-    private val validatedFiles = ConcurrentHashMap<String, ValidatedFileIdentity>()
+    private val validatedFiles: MutableMap<String, ValidatedFileIdentity> =
+        Collections.synchronizedMap(
+            object : LinkedHashMap<String, ValidatedFileIdentity>(64, 0.75f, true) {
+                override fun removeEldestEntry(
+                    eldest: MutableMap.MutableEntry<String, ValidatedFileIdentity>,
+                ): Boolean = size > MAX_VALIDATED_FILES_SIZE
+            },
+        )
 
     fun resolve(
         url: String?,
@@ -57,35 +66,39 @@ class ArtworkUriResolver @Inject constructor(
             return drawableUri(placeholder)
         }
 
-        if (isInCoilDiskCache(url)) {
-            return ArtworkProvider.uriFor(context, url)
+        validatedIdentity(url)?.let {
+            return ArtworkProvider.uriFor(context, url, it)
         }
 
         schedulePrefetch(url)
         return drawableUri(placeholder)
     }
 
-    private fun isInCoilDiskCache(url: String): Boolean {
-        val diskCache = context.imageLoader.diskCache ?: return false
+    private fun validatedIdentity(url: String): String? {
+        val diskCache = context.imageLoader.diskCache ?: return null
 
         val snapshot = try {
             diskCache.openSnapshot(url)
         } catch (_: Throwable) {
             null
-        } ?: return false
+        } ?: return null
 
-        val isValid = try {
+        val identity = try {
             val file = snapshot.data.toFile()
-            file.exists() && file.length() > 0L && isValidImageFile(file)
+            if (file.exists() && file.length() > 0L && isValidImageFile(file)) {
+                "${file.length()}:${file.lastModified()}"
+            } else {
+                null
+            }
         } catch (_: Throwable) {
-            false
+            null
         }
         snapshot.close()
 
-        if (!isValid) {
+        if (identity == null) {
             runCatching { diskCache.remove(url) }
         }
-        return isValid
+        return identity
     }
 
     internal fun isValidImageFile(file: File): Boolean {

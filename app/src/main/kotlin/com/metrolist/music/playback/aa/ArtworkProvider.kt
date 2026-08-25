@@ -27,11 +27,12 @@ class ArtworkProvider : ContentProvider() {
         private fun authority(context: Context): String =
             "${context.packageName}.aa.artwork"
 
-        fun uriFor(context: Context, url: String): Uri =
+        fun uriFor(context: Context, url: String, validationToken: String): Uri =
             Uri.Builder()
                 .scheme(ContentResolver.SCHEME_CONTENT)
                 .authority(authority(context))
                 .appendPath(encodeUrl(url))
+                .appendQueryParameter("v", validationToken)
                 .build()
 
         private fun encodeUrl(url: String): String =
@@ -90,6 +91,12 @@ class ArtworkProvider : ContentProvider() {
             if (!file.exists() || file.length() == 0L) {
                 throw FileNotFoundException("Artwork file is empty")
             }
+
+            val expected = uri.getQueryParameter("v")
+            if (expected != null && expected != "${file.length()}:${file.lastModified()}") {
+                throw FileNotFoundException("Artwork replaced after validation")
+            }
+
             return block(file)
         } finally {
             snapshot.close()
