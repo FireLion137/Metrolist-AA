@@ -48,6 +48,7 @@ class ArtworkUriResolver @Inject constructor(
     private val failedUrls = ConcurrentHashMap<String, Long>()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val semaphore = Semaphore(MAX_CONCURRENT_DOWNLOADS)
+    private var onArtworkReadyListener: ((String) -> Unit)? = null
 
     private data class ValidatedFileIdentity(val size: Long, val lastModified: Long)
     private val validatedFiles: MutableMap<String, ValidatedFileIdentity> =
@@ -247,11 +248,16 @@ class ArtworkUriResolver @Inject constructor(
         }
     }
 
+    fun setOnArtworkReadyListener(listener: ((String) -> Unit)?) {
+        onArtworkReadyListener = listener
+    }
+
     internal fun onPrefetchCompleted(url: String, isError: Boolean) {
         if (isError || validatedIdentity(url) == null) {
             addFailedUrl(url)
         } else {
             failedUrls.remove(url)
+            onArtworkReadyListener?.invoke(url)
         }
     }
 

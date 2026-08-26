@@ -70,7 +70,10 @@ import com.metrolist.music.playback.queues.YouTubeQueue
 import com.metrolist.music.ui.screens.settings.AndroidAutoSection
 import com.metrolist.music.ui.screens.settings.deserializeSections
 import com.metrolist.music.ui.screens.settings.serializeSections
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import java.util.concurrent.ConcurrentHashMap
+import kotlin.time.Duration.Companion.milliseconds
 
 class MediaLibrarySessionCallback
 @Inject
@@ -87,6 +90,9 @@ constructor(
     var toggleLibrary: () -> Unit = {}
     var addToTargetPlaylist: () -> Unit = {}
 
+    private val pendingParentIds = ConcurrentHashMap.newKeySet<String>()
+    private var artworkNotifyJob: Job? = null
+
     fun release() {
         scope.cancel()
     }
@@ -95,6 +101,8 @@ constructor(
         session: MediaSession,
         controller: MediaSession.ControllerInfo,
     ): MediaSession.ConnectionResult {
+        setupArtworkReadyListener()
+
         val connectionResult = super.onConnect(session, controller)
         return MediaSession.ConnectionResult.accept(
             connectionResult.availableSessionCommands
@@ -908,8 +916,37 @@ constructor(
 
     private fun safeArtworkUri(
         url: String?,
+        parentId: String,
         @DrawableRes placeholder: Int = R.drawable.music_note,
-    ): Uri = artworkUriResolver.resolve(url, placeholder)
+    ): Uri {
+        val uri = artworkUriResolver.resolve(url, placeholder)
+        if (uri.scheme != ContentResolver.SCHEME_CONTENT &&
+            !url.isNullOrBlank() &&
+            parentId.startsWith("${MusicService.SEARCH}/")) {
+            return url.toUri()
+        }
+        if (uri.scheme == ContentResolver.SCHEME_ANDROID_RESOURCE) {
+            pendingParentIds.add(parentId)
+        }
+        return uri
+    }
+
+    private fun setupArtworkReadyListener() {
+        artworkUriResolver.setOnArtworkReadyListener {
+            artworkNotifyJob?.cancel()
+            artworkNotifyJob = scope.launch {
+                delay(2000.milliseconds)
+                if (!::service.isInitialized) return@launch
+                val toNotify = pendingParentIds.toList()
+                pendingParentIds.clear()
+                if (toNotify.isEmpty()) return@launch
+                val mediaLibrarySession = service.sessions.firstOrNull() as? MediaLibrarySession
+                toNotify.forEach { parentId ->
+                    mediaLibrarySession?.notifyChildrenChanged(parentId, MAX_ANDROID_AUTO_PAGE_SIZE, null)
+                }
+            }
+        }
+    }
 
     private fun Song.toMediaItem(path: String, isPlayable: Boolean = true, isBrowsable: Boolean = false): MediaItem {
         return MediaItem
@@ -925,7 +962,7 @@ constructor(
                      .setArtist(artists.joinToArtistString(getArtistSeparator(context)) {
                          ArtistNameAliases.resolve(it.id, it.name)
                      })
-                     .setArtworkUri(safeArtworkUri(song.thumbnailUrl))
+                     .setArtworkUri(safeArtworkUri(song.thumbnailUrl, path))
                     .setIsPlayable(isPlayable)
                     .setIsBrowsable(isBrowsable)
                     .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
