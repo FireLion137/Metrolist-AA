@@ -26,12 +26,10 @@ class YouTubeUtilsTest {
     }
 
     @Test
-    fun `i_ytimg url is upgraded to maxresdefault when requesting large size`() {
-        val url = "https://i.ytimg.com/vi/abc/hqdefault.jpg?sqp=-oaymwE"
-        assertEquals(
-            "https://i.ytimg.com/vi/abc/maxresdefault.jpg?sqp=-oaymwE",
-            url.resize(544, 544),
-        )
+    fun `i_ytimg url keeps the thumbnail variant provided by YouTube`() {
+        // maxresdefault is optional and returns 404 for videos that do not publish one.
+        val url = "https://i.ytimg.com/vi/jNQXAC9IVRw/hqdefault.jpg?sqp=-oaymwE"
+        assertEquals(url, url.resize(1080, 1080))
     }
 
     @Test

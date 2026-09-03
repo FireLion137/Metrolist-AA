@@ -155,13 +155,6 @@ val PauseListenHistoryKey = booleanPreferencesKey("pauseListenHistory")
 val PauseSearchHistoryKey = booleanPreferencesKey("pauseSearchHistory")
 val DisableScreenshotKey = booleanPreferencesKey("disableScreenshot")
 
-// Stream sources — which innertube clients are used for stream resolution (Settings → Stream sources).
-val StreamSourceWebRemixKey = booleanPreferencesKey("streamSourceWebRemix")
-val StreamSourceTVHTML5Key = booleanPreferencesKey("streamSourceTVHTML5")
-val StreamSourceAndroidVRKey = booleanPreferencesKey("streamSourceAndroidVR")
-val StreamSourceVisionOSKey = booleanPreferencesKey("streamSourceVisionOS")
-val StreamSourceWebCreatorKey = booleanPreferencesKey("streamSourceWebCreator")
-
 val EnableDynamicIconKey = booleanPreferencesKey("enableDynamicIcon")
 
 val EnableDiscordRPCKey = booleanPreferencesKey("discordRPCEnable")
@@ -254,6 +247,7 @@ val QuickPicksKey = stringPreferencesKey("discover")
 val PreferredLyricsProviderKey = stringPreferencesKey("lyricsProvider")
 val LyricsProviderOrderKey = stringPreferencesKey("lyricsProviderOrder")
 val SimpMusicMigrationDoneKey = booleanPreferencesKey("simpMusicMigrationDone")
+val VideoThumbnailMigrationDoneKey = booleanPreferencesKey("videoThumbnailMigrationDone")
 val QueueEditLockKey = booleanPreferencesKey("queueEditLock")
 val ShowWrappedCardKey = booleanPreferencesKey("show_wrapped_card")
 val WrappedSeenKey = booleanPreferencesKey("wrapped_seen")
@@ -456,14 +450,14 @@ val DeeplApiKey = stringPreferencesKey("deeplApiKey")
 val DeeplFormalityKey = stringPreferencesKey("deeplFormality")
 val AiSystemPromptKey = stringPreferencesKey("aiSystemPrompt")
 
-const val DEFAULT_AI_SYSTEM_PROMPT = """You are a precise lyrics translation assistant. Your output must ALWAYS be a valid JSON array of strings.
+const val DEFAULT_AI_SYSTEM_PROMPT = """You are a precise lyrics translation assistant. Your output must ALWAYS be a valid JSON object of the form {"lines": ["line1", "line2", "line3"]}.
 
 CRITICAL RULES:
-1. Output ONLY a JSON array: ["line1", "line2", "line3"]
+1. Output ONLY the JSON object: {"lines": ["line1", "line2", "line3"]}
 2. NO explanations, NO questions, NO additional text
-3. Each input line maps to exactly one output line
+3. Each input line maps to exactly one entry in the "lines" array
 4. Preserve empty lines as empty strings ""
-5. Return EXACTLY {lineCount} items in the array
+5. The "lines" array must contain EXACTLY {lineCount} items
 6. If uncertain, provide best approximation but maintain line count"""
 val LyricsGlowEffectKey = booleanPreferencesKey("lyricsGlowEffect")
 

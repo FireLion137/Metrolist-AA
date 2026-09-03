@@ -150,7 +150,7 @@ fun AddToPlaylistDialogOnline(
                 val ids = songs.map { it.id }
                 playlistsContainingSong = playlists
                     .filter { playlist ->
-                        database.playlistDuplicates(playlist.id, ids).isNotEmpty()
+                        database.playlistDuplicatesBatched(playlist.id, ids).isNotEmpty()
                     }
                     .map { it.id }
                     .toSet()
@@ -463,15 +463,15 @@ fun AddToPlaylistDialogOnline(
                 TextButton(
                     onClick = {
                         showDuplicateDialog = false
-                        onDismiss()
-                        database.transaction {
-                            addSongsToPlaylist(
+                        coroutineScope.launch {
+                            database.addSongsToPlaylist(
                                 selectedPlaylist!!,
                                 songIds!!.filter {
                                     !duplicates.contains(it)
                                 }.map { it to null },
                                 prepend = addToPlaylistPosition.prepend,
                             )
+                            onDismiss()
                         }
                     }
                 ) {
@@ -481,13 +481,13 @@ fun AddToPlaylistDialogOnline(
                 TextButton(
                     onClick = {
                         showDuplicateDialog = false
-                        onDismiss()
-                        database.transaction {
-                            addSongsToPlaylist(
+                        coroutineScope.launch {
+                            database.addSongsToPlaylist(
                                 selectedPlaylist!!,
                                 songIds!!.map { it to null },
                                 prepend = addToPlaylistPosition.prepend,
                             )
+                            onDismiss()
                         }
                     }
                 ) {

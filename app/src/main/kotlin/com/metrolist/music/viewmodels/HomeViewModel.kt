@@ -78,6 +78,16 @@ data class CommunityPlaylistItem(
     val songs: List<SongItem>
 )
 
+internal fun buildSpeedDialItems(
+    pinned: List<YTItem>,
+    keepListening: List<YTItem>,
+    quickPicks: List<YTItem>,
+    home: List<YTItem>,
+): List<YTItem> =
+    (pinned + keepListening + quickPicks + home)
+        .distinctBy { it.id }
+        .take(27)
+
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     @ApplicationContext val context: Context,
@@ -122,69 +132,55 @@ class HomeViewModel @Inject constructor(
         combine(
             database.speedDialDao.getAll(),
             keepListening,
-            quickPicks
-        ) { pinned, keepListening, quick ->
-            val pinnedItems = pinned.map { it.toYTItem() }
-            val filled = pinnedItems.toMutableList()
-            val targetSize = 27
-
-            if (filled.size < targetSize) {
-                // Keep Listening (History/Heavy Rotation)
-                keepListening?.let { k ->
-                    val needed = targetSize - filled.size
-                    val available = k.filter { item ->
-                        filled.none { p -> p.id == item.id }
-                    }.mapNotNull { item ->
+            quickPicks,
+            homePage,
+        ) { pinned, keepListening, quick, home ->
+            buildSpeedDialItems(
+                pinned = pinned.map { it.toYTItem() },
+                keepListening =
+                    keepListening.orEmpty().mapNotNull { item ->
                         when (item) {
-                            is Song -> SongItem(
-                                id = item.id,
-                                title = item.title,
-                                artists = item.artists.map { Artist(name = it.name, id = it.id) },
-                                thumbnail = item.thumbnailUrl ?: "",
-                                explicit = false
-                            )
-                            is Album -> AlbumItem(
-                                browseId = item.id,
-                                playlistId = item.album.playlistId ?: "",
-                                title = item.title,
-                                artists = item.artists.map { Artist(name = it.name, id = it.id) },
-                                year = item.album.year,
-                                thumbnail = item.thumbnailUrl ?: ""
-                            )
-                            is com.metrolist.music.db.entities.Artist -> ArtistItem(
-                                id = item.id,
-                                title = item.title,
-                                thumbnail = item.thumbnailUrl,
-                                shuffleEndpoint = null,
-                                radioEndpoint = null
-                            )
+                            is Song ->
+                                SongItem(
+                                    id = item.id,
+                                    title = item.title,
+                                    artists = item.artists.map { Artist(name = it.name, id = it.id) },
+                                    thumbnail = item.thumbnailUrl ?: "",
+                                )
+
+                            is Album ->
+                                AlbumItem(
+                                    browseId = item.id,
+                                    playlistId = item.album.playlistId ?: "",
+                                    title = item.title,
+                                    artists = item.artists.map { Artist(name = it.name, id = it.id) },
+                                    year = item.album.year,
+                                    thumbnail = item.thumbnailUrl ?: "",
+                                )
+
+                            is com.metrolist.music.db.entities.Artist ->
+                                ArtistItem(
+                                    id = item.id,
+                                    title = item.title,
+                                    thumbnail = item.thumbnailUrl,
+                                    shuffleEndpoint = null,
+                                    radioEndpoint = null,
+                                )
+
                             else -> null
                         }
-                    }
-                    filled.addAll(available.take(needed))
-                }
-            }
-
-            if (filled.size < targetSize) {
-                // Quick Picks
-                quick?.let { q ->
-                    val needed = targetSize - filled.size
-                    val available = q.filter { song ->
-                        filled.none { p -> p.id == song.id }
-                    }.map { song ->
+                    },
+                quickPicks =
+                    quick.orEmpty().map { song ->
                         SongItem(
                             id = song.id,
                             title = song.title,
                             artists = song.artists.map { Artist(name = it.name, id = it.id) },
                             thumbnail = song.thumbnailUrl ?: "",
-                            explicit = false
                         )
-                    }
-                    filled.addAll(available.take(needed))
-                }
-            }
-            
-            filled.take(targetSize)
+                    },
+                home = home?.sections.orEmpty().flatMap { it.items },
+            )
         }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     suspend fun getRandomItem(): YTItem? {
@@ -267,18 +263,6 @@ class HomeViewModel @Inject constructor(
     val wrappedSeen: StateFlow<Boolean> = context.dataStore.data.map { prefs ->
         prefs[WrappedSeenKey] ?: false
     }.stateIn(viewModelScope, SharingStarted.Lazily, false)
-
-    fun togglePin(item: YTItem) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val speedDialItem = SpeedDialItem.fromYTItem(item)
-            val isPinned = database.speedDialDao.isPinned(speedDialItem.id).first()
-            if (isPinned) {
-                database.speedDialDao.delete(speedDialItem.id)
-            } else {
-                database.speedDialDao.insert(speedDialItem)
-            }
-        }
-    }
 
     fun markWrappedAsSeen() {
         viewModelScope.launch(Dispatchers.IO) {

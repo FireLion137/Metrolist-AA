@@ -230,13 +230,6 @@ object Updater {
     }
 
     /**
-     * Get all available download URLs for a release
-     */
-    fun getAllDownloadUrls(releaseInfo: ReleaseInfo): Map<String, String> {
-        return releaseInfo.assets.associate { "${it.architecture}-${it.variant}" to it.downloadUrl }
-    }
-
-    /**
      * Check if update is needed (respects 2-hour cache)
      */
     suspend fun checkForUpdate(forceRefresh: Boolean = false): Result<Pair<ReleaseInfo?, Boolean>> =
@@ -268,14 +261,6 @@ object Updater {
             }
         }
 
-    /**
-     * Get the download URL for the correct app variant
-     * Returns null if no matching asset is found
-     */
-    fun getLatestDownloadUrl(): String? {
-        return cachedReleaseInfo?.let { getDownloadUrlForCurrentVariant(it) }
-    }
-    
     /**
      * Get the latest release info (cached)
      */

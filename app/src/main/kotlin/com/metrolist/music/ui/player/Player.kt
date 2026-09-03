@@ -969,7 +969,8 @@ fun BottomSheetPlayer(
                                         contentDescription = null,
                                         modifier =
                                             Modifier
-                                                .size(32.dp)
+                                                .size(32.dp),
+                                        tint = textButtonColor.copy(alpha = 0.7f),
                                     )
                                 }
                             } else {

@@ -17,6 +17,7 @@ import com.metrolist.music.db.entities.AlbumEntity
 import com.metrolist.music.db.entities.ArtistEntity
 import com.metrolist.music.db.entities.SongArtistMap
 import com.metrolist.music.db.entities.SongEntity
+import com.metrolist.music.models.MediaMetadata
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -84,6 +85,33 @@ class SongMetadataEditingTest {
             )
 
             val refreshedSong = database.dao.song("song").first()!!
+            assertEquals("Edited title", refreshedSong.song.title)
+            assertEquals(200, refreshedSong.song.duration)
+            assertEquals(listOf("edited-artist"), refreshedSong.orderedArtists.map { it.id })
+        }
+
+    @Test
+    fun `download refresh preserves edited title and artists`() =
+        runBlocking {
+            val songEntity = SongEntity(id = "song", title = "Edited title", duration = 100)
+            database.dao.insert(ArtistEntity(id = "edited-artist", name = "Edited artist"))
+            database.dao.insert(songEntity)
+            database.dao.insert(SongArtistMap(songId = songEntity.id, artistId = "edited-artist", position = 0))
+            val existing = database.dao.song(songEntity.id).first()!!
+
+            database.dao.update(
+                existing,
+                MediaMetadata(
+                    id = existing.id,
+                    title = "Remote title",
+                    artists = listOf(MediaMetadata.Artist(id = "remote-artist", name = "Remote artist")),
+                    duration = 200,
+                ),
+                overwriteTitle = false,
+                overwriteArtists = false,
+            )
+
+            val refreshedSong = database.dao.song(existing.id).first()!!
             assertEquals("Edited title", refreshedSong.song.title)
             assertEquals(200, refreshedSong.song.duration)
             assertEquals(listOf("edited-artist"), refreshedSong.orderedArtists.map { it.id })

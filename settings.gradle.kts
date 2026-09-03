@@ -37,17 +37,6 @@ dependencyResolutionManagement {
 }
 
 // F-Droid doesn't support foojay-resolver plugin
-// plugins {
-//     id("org.gradle.toolchains.foojay-resolver-convention") version("1.0.0")
-// }
-
 rootProject.name = "Metrolist"
 include(":app")
 include(":innertube")
-include(":kugou")
-include(":lrclib")
-
-include(":lastfm")
-include(":betterlyrics")
-include(":shazamkit")
-include(":paxsenix")

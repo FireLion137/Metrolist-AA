@@ -227,6 +227,7 @@
     <string name="import_online">Import an M3U playlist</string>
     <string name="import_csv">Import a CSV playlist</string>
     <string name="playlist_unavailable">Playlist unavailable</string>
+    <string name="playlist_created_locally">YouTube sync failed. Playlist created locally.</string>
     <string name="playlist_add_local_to_synced_note">NOTE: Adding local songs to synced or remote playlists is not supported. Any other combination is valid</string>
     <string name="export_playlist">Export playlist</string>
     <string name="export_as_csv">Export as CSV</string>
@@ -535,6 +536,9 @@
 
     <!-- Playback errors -->
     <string name="error_playback_failed">Playback failed</string>
+    <string name="error_no_internet_connection">No internet connection</string>
+    <string name="error_offline_playback">You’re offline. Connect to the internet, or play a track downloaded for offline use.</string>
+    <string name="error_explicit_login_recommended">Explicit playback works better with a logged-in account.</string>
     <string name="error_job_cancelled">The video is not available for playback. Try again or skip to the next song.</string>
     <string name="error_episode_save">Failed to save episode</string>
     <string name="error_episode_remove">Failed to remove episode</string>
@@ -700,6 +704,7 @@
     <string name="ai_provider_xai_help">Visit https://console.x.ai</string>
     <string name="ai_provider_deepl_help">Visit https://deepl.com/pro-api for free and paid keys</string>
     <string name="ai_provider_mistral_help">Visit https://console.mistral.ai/api-keys</string>
+    <string name="ai_provider_inception_help">Visit https://platform.inceptionlabs.ai for API keys</string>
     <string name="ai_deepl_formality">Formality</string>
     <string name="ai_deepl_formality_default">Default</string>
     <string name="ai_deepl_formality_more">More formal</string>

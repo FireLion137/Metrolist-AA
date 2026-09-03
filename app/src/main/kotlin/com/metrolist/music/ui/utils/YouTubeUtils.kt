@@ -13,9 +13,6 @@ private val GOOGLEUSERCONTENT_SIZE_PATTERN =
     Regex("^(https://(?:lh3|yt3)\\.googleusercontent\\.com/[^?]*?)=w(\\d+)-h(\\d+)[^?]*(\\?.*)?$")
 private val GGPHT_SIZE_PATTERN =
     Regex("^(https://yt3\\.ggpht\\.com/[^?=]+)=(?:s\\d+|w\\d+-h\\d+)[^?]*(\\?.*)?$")
-private val YTIMG_DEFAULT_IMAGE_PATTERN =
-    Regex("/(?:default|mqdefault|hqdefault|sddefault)\\.jpg")
-
 fun String.resize(
     width: Int? = null,
     height: Int? = null,
@@ -41,10 +38,6 @@ fun String.resize(
         } else {
             "${group[1]}=s${width ?: height}$query"
         }
-    }
-
-    if (startsWith("https://i.ytimg.com/") && maxOf(width ?: 0, height ?: 0) >= 544) {
-        return replace(YTIMG_DEFAULT_IMAGE_PATTERN, "/maxresdefault.jpg")
     }
 
     return this

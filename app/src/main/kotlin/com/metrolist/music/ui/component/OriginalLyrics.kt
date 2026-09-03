@@ -143,7 +143,6 @@ import com.metrolist.music.constants.TranslateLanguageKey
 import com.metrolist.music.constants.TranslateModeKey
 import com.metrolist.music.db.entities.LyricsEntity.Companion.LYRICS_NOT_FOUND
 import com.metrolist.music.lyrics.LyricsEntry
-import com.metrolist.music.lyrics.LyricsResyncHelper
 import com.metrolist.music.lyrics.LyricsTranslationHelper
 import com.metrolist.music.lyrics.LyricsUtils.findCurrentLineIndex
 import com.metrolist.music.lyrics.LyricsUtils.isBelarusian
@@ -630,7 +629,6 @@ fun OriginalLyrics(
         }
     }
 
-    val latestShowLyrics by rememberUpdatedState(showLyrics)
     val latestResyncLyrics by rememberUpdatedState(
         newValue = {
             scope.launch {
@@ -639,14 +637,6 @@ fun OriginalLyrics(
             isAutoScrollEnabled = true
         },
     )
-
-    LaunchedEffect(Unit) {
-        LyricsResyncHelper.resyncTrigger.collect {
-            if (latestShowLyrics) {
-                latestResyncLyrics()
-            }
-        }
-    }
 
     LaunchedEffect(currentLineIndex, lastPreviewTime, initialScrollDone, isAutoScrollEnabled) {
         if (!isSynced) return@LaunchedEffect

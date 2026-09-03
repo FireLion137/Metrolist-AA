@@ -47,11 +47,16 @@ class CachePlaylistPartitionTest {
     }
 
     @Test
-    fun `downloaded song stays cached even when the cache reports a miss`() {
-        val result = partitionCachedSongs(listOf(song("a", isDownloaded = true))) { _, _ -> false }
+    fun `downloaded song is excluded without clearing its download date`() {
+        var lookups = 0
+        val result = partitionCachedSongs(listOf(song("a", isDownloaded = true))) { _, _ ->
+            lookups++
+            true
+        }
 
-        assertEquals(listOf("a"), result.stillCached.map { it.id })
+        assertEquals(emptyList<String>(), result.stillCached.map { it.id })
         assertEquals(emptyList<String>(), result.stale.map { it.id })
+        assertEquals(0, lookups)
     }
 
     @Test

@@ -8,6 +8,7 @@ package com.metrolist.music.playback
 import android.content.Context
 import android.net.ConnectivityManager
 import androidx.core.content.getSystemService
+import androidx.core.net.toUri
 import androidx.media3.database.DatabaseProvider
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.ResolvingDataSource
@@ -17,15 +18,25 @@ import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.offline.Download
 import androidx.media3.exoplayer.offline.DownloadManager
 import androidx.media3.exoplayer.offline.DownloadNotificationHelper
+import androidx.media3.exoplayer.offline.DownloadRequest
+import androidx.media3.exoplayer.offline.DownloadService
+import coil3.imageLoader
+import coil3.request.CachePolicy
+import coil3.request.ImageRequest
 import com.metrolist.innertube.YouTube
+import com.metrolist.innertube.models.SongItem
 import com.metrolist.innertubex.extraction.ContentHints
 import com.metrolist.music.constants.AudioQuality
 import com.metrolist.music.constants.AudioQualityKey
 import com.metrolist.music.db.MusicDatabase
+import com.metrolist.music.db.entities.AlbumEntity
 import com.metrolist.music.db.entities.FormatEntity
+import com.metrolist.music.db.entities.Song
 import com.metrolist.music.db.entities.SongEntity
 import com.metrolist.music.di.DownloadCache
 import com.metrolist.music.di.PlayerCache
+import com.metrolist.music.models.MediaMetadata
+import com.metrolist.music.models.toMediaMetadata
 import com.metrolist.music.utils.InnerTubeXPlayer
 import com.metrolist.music.utils.enumPreference
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -41,6 +52,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import okhttp3.OkHttpClient
 import timber.log.Timber
 import java.io.IOException
@@ -53,7 +66,7 @@ import javax.inject.Singleton
 class DownloadUtil
 @Inject
 constructor(
-    @ApplicationContext context: Context,
+    @ApplicationContext private val context: Context,
     val database: MusicDatabase,
     val databaseProvider: DatabaseProvider,
     @DownloadCache val downloadCache: Cache,
@@ -76,6 +89,7 @@ constructor(
             .build()
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val downloadPreparations = Semaphore(3)
 
     val downloads = MutableStateFlow<Map<String, Download>>(emptyMap())
 
@@ -84,6 +98,7 @@ constructor(
             CacheDataSource
                 .Factory()
                 .setCache(playerCache)
+                .setCacheWriteDataSinkFactory(null)
                 .setUpstreamDataSourceFactory(
                     OkHttpDataSource.Factory(streamHttpClient),
                 ),
@@ -241,6 +256,7 @@ constructor(
                         scope.launch {
                             when (download.state) {
                                 Download.STATE_COMPLETED -> {
+                                    removeFromPlayerCache(download.request.id)
                                     database.updateDownloadedInfo(download.request.id, true, LocalDateTime.now())
                                 }
                                 Download.STATE_FAILED,
@@ -280,17 +296,106 @@ constructor(
 
     init {
         val result = mutableMapOf<String, Download>()
-        val cursor = downloadManager.downloadIndex.getDownloads()
-        while (cursor.moveToNext()) {
-            result[cursor.download.request.id] = cursor.download
+        downloadManager.downloadIndex.getDownloads().use { cursor ->
+            while (cursor.moveToNext()) {
+                result[cursor.download.request.id] = cursor.download
+            }
         }
         downloads.value = result
+        scope.launch {
+            result.values
+                .filter { it.state == Download.STATE_COMPLETED }
+                .forEach { removeFromPlayerCache(it.request.id) }
+        }
     }
 
     fun getDownload(songId: String): Flow<Download?> = downloads.map { it[songId] }
 
+    fun download(song: Song) = download(song.toMediaMetadata())
+
+    fun download(song: SongItem) = download(song.toMediaMetadata())
+
+    fun download(mediaMetadata: MediaMetadata) {
+        scope.launch {
+            downloadPreparations.withPermit {
+                if (!shouldPrepareDownload(downloads.value[mediaMetadata.id]?.state)) return@withPermit
+
+                mediaMetadata.album?.let { album ->
+                    if (database.albumEntity(album.id) == null) {
+                        database.insert(
+                            AlbumEntity(
+                                id = album.id,
+                                title = album.title,
+                                thumbnailUrl = mediaMetadata.thumbnailUrl,
+                                songCount = 0,
+                                duration = 0,
+                            ),
+                        )
+                    }
+                }
+
+                val existing = database.getSongByIdBlocking(mediaMetadata.id)
+                if (existing == null) {
+                    database.insert(mediaMetadata)
+                } else {
+                    database.update(
+                        existing,
+                        mediaMetadata,
+                        overwriteTitle = false,
+                        overwriteArtists = false,
+                    )
+                }
+
+                if (!shouldPrepareDownload(downloadManager.downloadIndex.getDownload(mediaMetadata.id)?.state)) {
+                    return@withPermit
+                }
+
+                val request =
+                    DownloadRequest
+                        .Builder(mediaMetadata.id, mediaMetadata.id.toUri())
+                        .setCustomCacheKey(mediaMetadata.id)
+                        .setData(mediaMetadata.title.toByteArray())
+                        .build()
+                DownloadService.sendAddDownload(
+                    context,
+                    ExoDownloadService::class.java,
+                    request,
+                    false,
+                )
+
+                val albumArtwork = database.getSongByIdBlocking(mediaMetadata.id)?.album?.thumbnailUrl
+                downloadArtworkUrls(mediaMetadata.thumbnailUrl, albumArtwork).forEach { artworkUrl ->
+                    runCatching {
+                        context.imageLoader.execute(
+                            ImageRequest
+                                .Builder(context)
+                                .data(artworkUrl)
+                                .memoryCachePolicy(CachePolicy.DISABLED)
+                                .diskCachePolicy(CachePolicy.ENABLED)
+                                .networkCachePolicy(CachePolicy.ENABLED)
+                                .build(),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun download(songId: String) {
+        scope.launch {
+            database.getSongByIdBlocking(songId)?.let { song ->
+                download(song)
+            }
+        }
+    }
+
     fun release() {
         scope.cancel()
+    }
+
+    private fun removeFromPlayerCache(songId: String) {
+        runCatching { playerCache.removeResource(songId) }
+            .onFailure { Timber.tag(TAG).w(it, "Failed to remove downloaded song $songId from player cache") }
     }
 
     private fun Throwable?.isExpiredStreamError(): Boolean {
@@ -306,6 +411,13 @@ constructor(
         return false
     }
 }
+
+internal fun shouldPrepareDownload(downloadState: Int?): Boolean = downloadState != Download.STATE_COMPLETED
+
+internal fun downloadArtworkUrls(
+    songArtwork: String?,
+    albumArtwork: String?,
+): List<String> = listOfNotNull(songArtwork, albumArtwork).filter(String::isNotBlank).distinct()
 
 internal fun downloadContentLength(
     statusCode: Int,
