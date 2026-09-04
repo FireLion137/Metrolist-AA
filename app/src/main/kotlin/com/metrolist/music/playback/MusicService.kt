@@ -61,6 +61,7 @@ import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.datasource.cache.Cache
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR
+import androidx.media3.datasource.cache.ContentMetadata
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
@@ -1724,14 +1725,21 @@ class MusicService :
      * prefetch can finish downloading a short file in seconds, long before the
      * user has actually listened to it (or even if they skipped away early).
      *
-     * No-op if already marked downloaded, or if we don't yet know the file's
-     * contentLength (FormatEntity not fetched yet).
+     * No-op if already marked downloaded, or if the file's content length is unknown.
      */
     private suspend fun markCachedIfFullyDownloaded(mediaId: String) {
         val song = database.song(mediaId).first() ?: return
         if (song.song.dateDownload != null || song.song.isDownloaded) return
-        val contentLength = song.format?.contentLength ?: return
-        if (!playerCache.isCached(mediaId, 0, contentLength)) return
+        val contentLength =
+            song.format?.contentLength
+                ?: ContentMetadata
+                    .getContentLength(playerCache.getContentMetadata(mediaId))
+                    .takeIf { it > 0L }
+                ?: return
+        if (!playerCache.isCached(mediaId, 0, contentLength)) {
+            delay(1_000)
+            if (!playerCache.isCached(mediaId, 0, contentLength)) return
+        }
         database.query {
             update(song.song.copy(dateDownload = java.time.LocalDateTime.now()))
         }
@@ -2442,11 +2450,11 @@ class MusicService :
         mediaItem: MediaItem?,
         reason: Int,
     ) {
-        // The track that was playing before this transition only gets marked as
-        // "fully cached" if it advanced AUTOmatically (i.e. it actually finished),
-        // never on a manual skip/seek. lastTransitionedMediaId must be read BEFORE
-        // it gets overwritten below.
-        if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
+        // Only natural completion transitions mark the previous track as fully cached,
+        // never a manual skip or seek. Read lastTransitionedMediaId before replacing it.
+        if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO ||
+            reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT
+        ) {
             lastTransitionedMediaId?.let { previousId ->
                 scope.launch(Dispatchers.IO) { markCachedIfFullyDownloaded(previousId) }
             }
@@ -2546,6 +2554,10 @@ class MusicService :
         updateInitialBufferRecovery(playbackState)
 
         if (playbackState == Player.STATE_ENDED) {
+            player.currentMediaItem?.mediaId?.let { mediaId ->
+                scope.launch(Dispatchers.IO) { markCachedIfFullyDownloaded(mediaId) }
+            }
+
             // Check sleep timer guard - don't autoplay/repeat if sleep timer will pause
             val timer = sleepTimer ?: return
             if (timer.isActive && timer.pauseWhenSongEnd) {
