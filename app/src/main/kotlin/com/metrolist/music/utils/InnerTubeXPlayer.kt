@@ -19,6 +19,7 @@ import com.metrolist.innertubex.extraction.PoTokenResult
 import com.metrolist.innertubex.extraction.StreamResolveException
 import com.metrolist.innertubex.extraction.TokenProvider
 import com.metrolist.innertubex.extraction.TokenProviderCapabilities
+import com.metrolist.innertubex.extraction.YtConfigParser
 import com.metrolist.innertubex.extraction.YtConfigParserImpl
 import com.metrolist.innertubex.extraction.generateClientPlaybackNonce
 import com.metrolist.innertubex.extraction.strategy.PoTokenProviderKind
@@ -159,7 +160,7 @@ object InnerTubeXPlayer {
                             latestTransport.innerTube,
                             remoteStore,
                             logger,
-                        ),
+                        ).withEmbeddedConfigFallback(),
                     cipherService = cipherService,
                     innerTube = latestTransport.innerTube,
                     tokenProvider = tokenProvider,
@@ -264,6 +265,19 @@ object InnerTubeXPlayer {
                 "https://raw.githubusercontent.com/ZemerTeam/zemer-cipher/master/library/src/main/assets/player_configs.json"
         }
     }
+
+    internal fun YtConfigParser.withEmbeddedConfigFallback(): YtConfigParser =
+        object : YtConfigParser by this {
+            override suspend fun fetchConfig(
+                videoId: String,
+                useLoginCookies: Boolean,
+            ) =
+                try {
+                    this@withEmbeddedConfigFallback.fetchConfig(videoId, useLoginCookies)
+                } catch (_: IllegalStateException) {
+                    this@withEmbeddedConfigFallback.fetchEmbeddedConfig(videoId, useLoginCookies = false)
+                }
+        }
 
     private fun AudioQuality.toInnerTubeX(connectivityManager: ConnectivityManager): InnerTubeXAudioQuality =
         when (this) {
