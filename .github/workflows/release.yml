@@ -226,8 +226,12 @@ jobs:
         run: |
           echo "Creating release v${{ needs.check-version.outputs.new_version }}"
 
+          sed -i "s|MetrolistGroup/Metrolist|${{ github.repository }}|g" release_notes.md
+
           {
             echo "Released by @${{ github.triggering_actor }}"
+            echo ""
+            echo "> ⚠️ **Note:** The files in this release are not the original files from the upstream project but contain modifications and customizations made in this repository."
             echo ""
             cat release_notes.md
           } > attributed_release_notes.md
