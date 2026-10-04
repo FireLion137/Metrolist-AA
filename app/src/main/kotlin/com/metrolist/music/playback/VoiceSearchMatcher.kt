@@ -35,10 +35,14 @@ object VoiceSearchMatcher {
         queryTokens: Set<String>,
         isTooGeneric: Boolean,
     ): Double {
-        val title = song.title.lowercase().trim()
-        val titleTokens = tokenize(title)
+        // Remove parentheses containing the query for better matching when the query is an artist
+        val cleanedTitle = stripParenthesizedPartsContainingQuery(
+            title = song.title.lowercase().trim(),
+            queryLower = queryLower,
+        )
+        val titleTokens = tokenize(cleanedTitle)
 
-        if (titleTokens == queryTokens || title == queryLower) return 1.0
+        if (titleTokens == queryTokens || cleanedTitle == queryLower) return 1.0
 
         val remaining = stripArtistTokens(queryTokens, song)
 
@@ -79,11 +83,44 @@ object VoiceSearchMatcher {
             (2.0 * titleCoverage * queryCoverage) / (titleCoverage + queryCoverage)   // harmonic mean
         else 0.0
 
-        return if (queryCoverage > 0.9 && titleCoverage <= 0.5) {
-            score * 0.85
-        } else {
-            score
+        // Penalize low title coverage, but lenient on titles with just a few extra words
+        val extraWords = titleTokens.size - matchedTitle
+        val penalty = when {
+            queryCoverage > 0.9 && titleCoverage < 0.4 -> 0.85
+            queryCoverage > 0.9 && extraWords <= 2 -> 0.95
+            queryCoverage > 0.9 && titleCoverage <= 0.5 -> 0.90
+            else -> 1.0
         }
+
+        return score * penalty
+    }
+
+
+    internal fun stripParenthesizedPartsContainingQuery(
+        title: String,
+        queryLower: String,
+    ): String {
+        val queryTokens = tokenize(queryLower)
+        if (queryTokens.isEmpty()) return title
+
+        val parenthesesRegex = Regex(
+            """(\([^)]*\)|\[[^]]*]|\{[^}]*\})"""
+        )
+
+        val strippedTitle = parenthesesRegex.replace(title) { matchResult ->
+            val fullMatch = matchResult.value
+            val innerContent = fullMatch.substring(1, fullMatch.length - 1)
+
+            val contentTokens = tokenize(innerContent.lowercase())
+
+            if (contentTokens.containsAll(queryTokens)) {
+                ""
+            } else {
+                fullMatch
+            }
+        }
+
+        return strippedTitle.replace(Regex("\\s{2,}"), " ").trim()
     }
 
 

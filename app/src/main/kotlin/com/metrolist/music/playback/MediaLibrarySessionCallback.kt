@@ -836,6 +836,10 @@ constructor(
                             searchResults.firstOrNull { it.id == songId }
                         }
 
+                    if (!isVoiceSearch && selectedSong == null) {
+                        return@future defaultResult
+                    }
+
                     if(context.dataStore.get(AutoRadioQueueKey, true) && selectedSong != null) {
                         val radioQueue = YouTubeQueue.radio(selectedSong.toMediaMetadata())
                         val radioStatus = runCatching {
@@ -859,7 +863,21 @@ constructor(
                         }
                     }
 
-                    val items = selectedSong?.let { listOf(it.toMediaItem()) } ?: searchResults.map { it.toMediaItem() }
+                    //If no specific track is found, filter the results to prioritize tracks by artist.
+                    val fallbackItems = if (isVoiceSearch && selectedSong == null) {
+                        val normalizedQuery = searchQuery.lowercase().trim()
+                        val artistMatches = searchResults.filter { song ->
+                            song.artists.any { artist ->
+                                val artistName = artist.name.lowercase()
+                                artistName.contains(normalizedQuery) || normalizedQuery.contains(artistName)
+                            }
+                        }
+                        artistMatches.ifEmpty { searchResults }
+                    } else {
+                        searchResults
+                    }
+
+                    val items = selectedSong?.let { listOf(it.toMediaItem()) } ?: fallbackItems.map { it.toMediaItem() }
                     if (items.isEmpty()) return@future defaultResult
 
                     val queueTitle = selectedSong?.song?.title ?: searchQuery

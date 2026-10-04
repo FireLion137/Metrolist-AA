@@ -133,4 +133,29 @@ class VoiceSearchMatcherTest {
         )
         assertEquals("not-first: correct winner", "Bohemian Rhapsody", best?.title)
     }
+
+    @Test
+    fun `title extensions should not lose strong matches`() {
+        val song = song("Blinding Lights Extended Remix", "The Weeknd")
+        val ranks = VoiceSearchMatcher.rankAll("Blinding Lights", listOf(song))
+        val bestScore = ranks.firstOrNull()?.score ?: 0.0
+
+        assertTrue("Score should be >= STRONG_MATCH_THRESHOLD (0.60), but was $bestScore",
+            bestScore >= VoiceSearchMatcher.STRONG_MATCH_THRESHOLD)
+    }
+
+    @Test
+    fun `cleaning title removes only artist parentheses`() {
+        val title = "Faded (with Alan Walker) (Instrumental)"
+
+        val cleanedTitle = VoiceSearchMatcher.stripParenthesizedPartsContainingQuery(
+            title = title,
+            queryLower = "alan walker",
+        )
+
+        assertEquals(
+            "Faded (Instrumental)",
+            cleanedTitle,
+        )
+    }
 }
