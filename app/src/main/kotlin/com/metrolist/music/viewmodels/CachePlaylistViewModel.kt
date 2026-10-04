@@ -9,6 +9,7 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.datasource.cache.Cache
+import androidx.media3.datasource.cache.ContentMetadata
 import com.metrolist.music.constants.HideExplicitKey
 import com.metrolist.music.constants.HideVideoSongsKey
 import com.metrolist.music.db.MusicDatabase
@@ -53,9 +54,10 @@ class CachePlaylistViewModel
                 context.dataStore.data.map { it[HideVideoSongsKey] ?: false }.distinctUntilChanged(),
                 ::Inputs,
             ).mapLatest { (flagged, hideExplicit, hideVideoSongs) ->
-                val partition = partitionCachedSongs(flagged) { songId, contentLength ->
-                    playerCache.isCached(songId, 0, contentLength)
-                }
+                val partition =
+                    partitionCachedSongs(flagged, ::cachedContentLength) { songId, contentLength ->
+                        playerCache.isCached(songId, 0, contentLength)
+                    }
 
                 // Clearing the flag removes these songs from cachePlaylistSongs(), so this
                 // re-emits once and then settles rather than looping.
@@ -74,20 +76,24 @@ class CachePlaylistViewModel
             }.flowOn(Dispatchers.IO)
                 .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-        fun removeSongFromCache(songId: String) {
-            playerCache.removeResource(songId)
+        fun removeSongFromCache(songId: String) = removeSongsFromCache(listOf(songId))
 
-            // Dropping the bytes does not touch the database, so nothing would invalidate
-            // cachePlaylistSongs() and the song would linger in the list until the screen is
-            // re-entered. Re-check this one song against the same rules and clear its flag here.
+        fun removeSongsFromCache(songIds: Collection<String>) {
+            songIds.forEach(playerCache::removeResource)
+
+            // Dropping the bytes does not touch the database, so clear the flags explicitly.
             database.query {
-                val song = getSongByIdBlocking(songId) ?: return@query
-                val partition = partitionCachedSongs(listOf(song)) { id, contentLength ->
-                    playerCache.isCached(id, 0, contentLength)
+                songIds.forEach { songId ->
+                    getSongByIdBlocking(songId)?.let { update(it.song.copy(dateDownload = null)) }
                 }
-                partition.stale.forEach { update(it.song.copy(dateDownload = null)) }
             }
         }
+
+        private fun cachedContentLength(song: Song): Long? =
+            song.format?.contentLength
+                ?: ContentMetadata
+                    .getContentLength(playerCache.getContentMetadata(song.id))
+                    .takeIf { it > 0L }
     }
 
 /**
@@ -111,6 +117,7 @@ internal data class CachedSongPartition(
  */
 internal fun partitionCachedSongs(
     flagged: List<Song>,
+    resolveContentLength: (Song) -> Long? = { it.format?.contentLength },
     isCached: (songId: String, contentLength: Long) -> Boolean,
 ): CachedSongPartition {
     val stillCached = mutableListOf<Song>()
@@ -118,7 +125,7 @@ internal fun partitionCachedSongs(
 
     for (song in flagged) {
         if (song.song.isDownloaded) continue
-        val contentLength = song.format?.contentLength
+        val contentLength = resolveContentLength(song)
         val present = contentLength != null && isCached(song.song.id, contentLength)
         if (present) stillCached += song else stale += song
     }

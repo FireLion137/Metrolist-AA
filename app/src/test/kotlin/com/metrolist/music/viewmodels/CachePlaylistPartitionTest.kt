@@ -60,6 +60,22 @@ class CachePlaylistPartitionTest {
     }
 
     @Test
+    fun `cache metadata length is used when format is missing`() {
+        val seen = mutableListOf<Pair<String, Long>>()
+        val result =
+            partitionCachedSongs(
+                flagged = listOf(song("a", contentLength = null)),
+                resolveContentLength = { 2_000L },
+            ) { id, length ->
+                seen += id to length
+                true
+            }
+
+        assertEquals(listOf("a"), result.stillCached.map { it.id })
+        assertEquals(listOf("a" to 2_000L), seen)
+    }
+
+    @Test
     fun `song with unknown content length is stale and is never looked up`() {
         var lookups = 0
         val result = partitionCachedSongs(listOf(song("a", contentLength = null))) { _, _ ->
