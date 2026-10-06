@@ -1103,8 +1103,8 @@ constructor(
                             searchResults.firstOrNull { it.id == songId }
                         }
 
-                    if(context.dataStore.get(AutoRadioQueueKey, true) && selectedSong != null) {
-                        val radioQueue = YouTubeQueue.radio(selectedSong.toMediaMetadata())
+                    if(context.dataStore.get(AutoRadioQueueKey, true)) {
+                        val radioQueue = YouTubeQueue.radio(selectedSong?.toMediaMetadata() ?: return@future defaultResult)
                         val radioStatus = runCatching {
                             withContext(Dispatchers.IO) {
                                 radioQueue
@@ -1126,17 +1126,14 @@ constructor(
                         }
                     }
 
-                    val items = selectedSong?.let { listOf(it.toMediaItem()) } ?: searchResults.map { it.toMediaItem() }
-                    if (items.isEmpty()) return@future defaultResult
-
-                    val queueTitle = selectedSong?.song?.title ?: searchQuery
+                    val items = listOf(selectedSong?.toMediaItem() ?: return@future defaultResult)
                     withContext(Dispatchers.Main) {
                         service.adoptQueue(
                             ListQueue(
-                                title = queueTitle,
+                                title = selectedSong.song.title,
                                 items = items,
                             ),
-                            title = queueTitle,
+                            title = selectedSong.song.title,
                         )
                     }
                     MediaItemsWithStartPosition(
