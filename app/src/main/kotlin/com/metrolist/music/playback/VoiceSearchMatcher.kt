@@ -35,14 +35,10 @@ object VoiceSearchMatcher {
         queryTokens: Set<String>,
         isTooGeneric: Boolean,
     ): Double {
-        // Remove parentheses containing the query for better matching when the query is an artist
-        val cleanedTitle = stripParenthesizedPartsContainingQuery(
-            title = song.title.lowercase().trim(),
-            queryLower = queryLower,
-        )
-        val titleTokens = tokenize(cleanedTitle)
+        val title = song.title.lowercase().trim()
+        val titleTokens = tokenize(title)
 
-        if (titleTokens == queryTokens || cleanedTitle == queryLower) return 1.0
+        if (titleTokens == queryTokens || title == queryLower) return 1.0
 
         val remaining = stripArtistTokens(queryTokens, song)
 
@@ -85,44 +81,15 @@ object VoiceSearchMatcher {
 
         // Penalize low title coverage, but lenient on titles with just a few extra words
         val extraWords = titleTokens.size - matchedTitle
-        val penalty = when {
-            queryCoverage > 0.9 && titleCoverage < 0.4 -> 0.85
-            queryCoverage > 0.9 && extraWords <= 2 -> 0.95
-            queryCoverage > 0.9 && titleCoverage <= 0.5 -> 0.90
+        val penalty = if (queryCoverage > 0.9) when {
+            titleCoverage < 0.4 || (titleCoverage <= 0.5 && extraWords == 1) -> 0.85
+            titleCoverage <= 0.5 && extraWords == 2 -> 0.90
+            titleCoverage <= 0.5 -> 0.95
             else -> 1.0
-        }
+        } else 1.0
 
         return score * penalty
     }
-
-
-    internal fun stripParenthesizedPartsContainingQuery(
-        title: String,
-        queryLower: String,
-    ): String {
-        val queryTokens = tokenize(queryLower)
-        if (queryTokens.isEmpty()) return title
-
-        val parenthesesRegex = Regex(
-            """(\([^)]*\)|\[[^]]*]|\{[^}]*\})"""
-        )
-
-        val strippedTitle = parenthesesRegex.replace(title) { matchResult ->
-            val fullMatch = matchResult.value
-            val innerContent = fullMatch.substring(1, fullMatch.length - 1)
-
-            val contentTokens = tokenize(innerContent.lowercase())
-
-            if (contentTokens.containsAll(queryTokens)) {
-                ""
-            } else {
-                fullMatch
-            }
-        }
-
-        return strippedTitle.replace(Regex("\\s{2,}"), " ").trim()
-    }
-
 
     internal fun tokenize(text: String): Set<String> =
         PUNCTUATION_REGEX.replace(text.lowercase(), " ")
@@ -178,5 +145,49 @@ object VoiceSearchMatcher {
         val p = 0.1
         val boostThreshold = 0.7
         return if (jaro > boostThreshold) jaro + (prefix * p * (1.0 - jaro)) else jaro
+    }
+
+    private const val ARTIST_TOKEN_SIMILARITY = 0.90
+    private const val ARTIST_TOKEN_LENGTH_RATIO = 0.75
+
+    private fun strictArtistTokenMatch(
+        queryToken: String,
+        artistToken: String,
+    ): Boolean {
+        if (queryToken == artistToken) return true
+        if (queryToken.length < 4 || artistToken.length < 4) {
+            return false
+        }
+
+        val shorter = minOf(queryToken.length, artistToken.length).toDouble()
+        val longer = maxOf(queryToken.length, artistToken.length).toDouble()
+
+        if (shorter / longer < ARTIST_TOKEN_LENGTH_RATIO) {
+            return false
+        }
+
+        return jaroWinkler(queryToken, artistToken) >= ARTIST_TOKEN_SIMILARITY
+    }
+
+    fun artistMatchesQuery(artistName: String, query: String): Boolean {
+        val artistTokens = tokenize(artistName.lowercase())
+        val queryTokens = tokenize(query.lowercase())
+
+        if (artistTokens.isEmpty() || queryTokens.isEmpty()) return false
+        if (artistTokens == queryTokens) return true
+
+        val queryMatchesArtist = queryTokens.all { queryToken ->
+            artistTokens.any { artistToken ->
+                strictArtistTokenMatch(queryToken, artistToken)
+            }
+        }
+
+        val artistMatchesQuery = artistTokens.all { artistToken ->
+            queryTokens.any { queryToken ->
+                strictArtistTokenMatch(queryToken, artistToken)
+            }
+        }
+
+        return queryMatchesArtist && artistMatchesQuery
     }
 }
