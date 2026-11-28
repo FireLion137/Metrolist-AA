@@ -4043,6 +4043,8 @@ object PlayerState {
             beginTransition = { preserveCurrent -> beginPlaybackTransition(preserveCast = true, preserveCurrent = preserveCurrent) },
             replaceQueue = { song, generation ->
                 initialRecommendationsGeneration = generation
+                deviceRadioBootstrapPending = false
+                deviceRadioBootstrapJob?.cancel()
                 replaceQueue(listOf(song), explicitRadioQueue = true)
             },
             play = play@{ song, generation, startPlaying, positionMs ->
