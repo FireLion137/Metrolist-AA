@@ -2315,7 +2315,7 @@ object PlayerState {
         playbackDuration.value = (queue.currentItem()?.duration ?: 0L) * 1000L
         progress = if (playbackDuration.value > 0) playbackPosition.value.toFloat() / playbackDuration.value else 0f
         val restoredSeed = queue.items.value.singleOrNull()
-        if (state.explicitRadioQueue && restoredSeed != null) {
+        if (!state.finite && state.explicitRadioQueue && restoredSeed != null) {
             deviceRadioBootstrapPending = true
             startPendingExplicitRadioBootstrap(restoredSeed, syncSession.sessionId)
         }
@@ -2359,6 +2359,7 @@ object PlayerState {
         resetRecommendations: Boolean = true,
         songsOnly: Boolean = false,
         shuffleModeEnabled: Boolean? = null,
+        explicitRadioQueue: Boolean = false,
     ) {
         val startSong = songs.getOrNull(startIndex)
         val blocked = BlockedContent.snapshot()
@@ -2377,6 +2378,12 @@ object PlayerState {
         }
         val retainShuffle = shuffleModeEnabled ?: (Settings.shared.persistentShuffleAcrossQueues && shuffleEnabled)
         syncSession.resetQueueMetadata()
+        syncSession.setPersistedQueueFlags(
+            finite = false,
+            explicitRadioQueue = explicitRadioQueue,
+            recommendationsLocked = false,
+            title = null,
+        )
         queue.setQueue(filteredSongs, adjustedStartIndex, recommendationsSongsOnly = songsOnly)
         shuffleEnabled = retainShuffle
         if (retainShuffle) {
@@ -2409,7 +2416,10 @@ object PlayerState {
             state.explicitRadioQueue && state.queue.displayedItems.size == 1 &&
                 (pendingExplicitRadioRequest || !syncSession.explicitRadioQueue || syncSession.sessionId != snapshot.sessionId)
         pendingExplicitRadioRequest = false
-        if (startsExplicitRadio) {
+        if (state.finite) {
+            deviceRadioBootstrapPending = false
+            deviceRadioBootstrapJob?.cancel()
+        } else if (startsExplicitRadio) {
             deviceRadioBootstrapPending = true
         } else if (appliedDeviceQueue != queueIdentity && !samePendingRadioSeed) {
             deviceRadioBootstrapPending = false
@@ -4033,7 +4043,7 @@ object PlayerState {
             beginTransition = { preserveCurrent -> beginPlaybackTransition(preserveCast = true, preserveCurrent = preserveCurrent) },
             replaceQueue = { song, generation ->
                 initialRecommendationsGeneration = generation
-                replaceQueue(listOf(song))
+                replaceQueue(listOf(song), explicitRadioQueue = true)
             },
             play = play@{ song, generation, startPlaying, positionMs ->
                 desiredPlayback.value = playbackTransitions.playbackIntent(startPlaying)
@@ -4175,6 +4185,7 @@ object PlayerState {
                             .singleOrNull()
                             ?.id == seed.id &&
                         syncSession.explicitRadioQueue &&
+                        !syncSession.finite &&
                         !syncSession.recommendationsLocked &&
                         !deviceConnect.isFollowing
                     ) {
